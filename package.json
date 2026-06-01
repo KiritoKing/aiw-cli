@@ -1,10 +1,36 @@
 {
-  "name": "aiw",
+  "name": "@chlrc/aiw",
   "version": "0.1.0",
   "type": "module",
   "description": "Personal AI workflow bridge for cmux, Worktrunk, and CLI agents.",
+  "keywords": [
+    "ai",
+    "cli",
+    "cmux",
+    "workflow",
+    "worktree"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KiritoKing/aiw-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KiritoKing/aiw-cli/issues"
+  },
+  "homepage": "https://github.com/KiritoKing/aiw-cli#readme",
   "bin": {
-    "aiw": "./bin/aiw"
+    "aiw": "bin/aiw"
+  },
+  "files": [
+    "bin",
+    "src",
+    "config",
+    "scripts",
+    "README.zh-CN.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "check": "node --check src/agent.mjs && node --check src/cli.mjs && node --check src/commit.mjs && node --check src/config.mjs && node --check src/deps.mjs && node --check src/git.mjs && node --check src/hooks.mjs && node --check src/init.mjs && node --check src/layout.mjs && node --check src/prompt.mjs && node --check src/run.mjs && node --check src/workspace.mjs",
