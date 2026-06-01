@@ -1,0 +1,16 @@
+{
+  "name": "aiw",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Personal AI workflow bridge for cmux, Worktrunk, and CLI agents.",
+  "bin": {
+    "aiw": "./bin/aiw"
+  },
+  "scripts": {
+    "check": "node --check src/agent.mjs && node --check src/cli.mjs && node --check src/commit.mjs && node --check src/config.mjs && node --check src/deps.mjs && node --check src/git.mjs && node --check src/hooks.mjs && node --check src/init.mjs && node --check src/layout.mjs && node --check src/prompt.mjs && node --check src/run.mjs && node --check src/workspace.mjs",
+    "install:global": "scripts/install-global.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
