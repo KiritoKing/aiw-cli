@@ -91,17 +91,17 @@ AIW 按以下顺序读取配置：
 
 ## 初始化
 
-在 macOS 或 Linux 上，可以用 `npx aiw init` 为一台机器初始化 AIW。
+在 macOS 或 Linux 上，可以用 `npx @chlrc/aiw init` 为一台机器初始化 AIW。
 
 初始化流程假设 Node.js 和 `npx` 已经可用。它会检查必要环境变量、POSIX shell 平台，以及默认工作流所需的阻塞依赖；如果缺少阻塞依赖，会在写文件前停止并给出安装建议。`fd`、`eza`、非默认 agent CLI 这类可选工具只报告，不阻塞。
 
 依赖门禁通过后，init 会创建缺失的目录和配置文件：
 
 ```bash
-npx aiw init
-npx aiw init --cmux-scope home
-npx aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
-npx aiw init --cmux-scope none --dry-run
+npx @chlrc/aiw init
+npx @chlrc/aiw init --cmux-scope home
+npx @chlrc/aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
+npx @chlrc/aiw init --cmux-scope none --dry-run
 ```
 
 - AIW 配置默认写入 `~/.config/aiw`；设置了 `$AIW_CONFIG_DIR` 时使用它。
@@ -250,7 +250,7 @@ aiw workspace open feat/foo --agent codex
 ## 核心命令
 
 ```bash
-npx aiw init
+npx @chlrc/aiw init
 aiw doctor
 aiw cmux-new --agent codex
 aiw cmux-new --pick-repo --agent codex

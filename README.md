@@ -30,10 +30,10 @@ node bin/aiw doctor
 node bin/aiw cmux-new --agent codex
 ```
 
-If `aiw` has been installed on your `PATH`, use:
+Bootstrap with the published package, then use the installed `aiw` binary:
 
 ```bash
-npx aiw init
+npx @chlrc/aiw init
 aiw doctor
 aiw cmux-new --agent codex
 ```
@@ -92,17 +92,17 @@ This lets the repo provide a usable default while still allowing a personal conf
 
 ## Init
 
-Use `npx aiw init` on macOS or Linux to bootstrap a machine for AIW.
+Use `npx @chlrc/aiw init` on macOS or Linux to bootstrap a machine for AIW.
 
 The init flow assumes Node.js and `npx` are already available. It checks required environment variables, the POSIX shell platform, and blocking tools for the default workflow. If any blocking dependency is missing, it stops before writing files and prints install guidance. Optional tools such as `fd`, `eza`, and non-default agent CLIs are reported without blocking.
 
 When the blocking gate passes, init creates missing directories and config files:
 
 ```bash
-npx aiw init
-npx aiw init --cmux-scope home
-npx aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
-npx aiw init --cmux-scope none --dry-run
+npx @chlrc/aiw init
+npx @chlrc/aiw init --cmux-scope home
+npx @chlrc/aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
+npx @chlrc/aiw init --cmux-scope none --dry-run
 ```
 
 - AIW config defaults to `~/.config/aiw`, or `$AIW_CONFIG_DIR` when set.
