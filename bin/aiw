@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+import { main } from "../src/cli.mjs";
+
+main(process.argv.slice(2)).catch((error) => {
+  const message = error && typeof error.message === "string" ? error.message : String(error);
+  console.error(`[error] ${message}`);
+  process.exit(typeof error.exitCode === "number" ? error.exitCode : 1);
+});

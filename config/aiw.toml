@@ -1,0 +1,41 @@
+[defaults]
+agent = "codex"
+editor = "nvim"
+files = "yazi"
+git = "lazygit"
+diff = "cmux-git-diff"
+diff_fallback = "delta"
+tree_depth = 3
+
+[paths]
+code_root = "~/Code"
+worktrees = "~/worktrees"
+core_config = "~/.config/aiw"
+
+[behavior]
+require_git_repo = true
+warn_dirty_before_new = true
+open_cmux_after_new = true
+use_worktrunk = true
+remove_worktree_after_merge = true
+
+[commit]
+agent = "codex"
+prompt_file = "commit-prompt.md"
+retries = 3
+max_diff_chars = 120000
+
+[git]
+lazygit_config = "lazygit-delta.yml"
+
+[workspace]
+stale_seconds = 604800
+
+[workspace.hooks]
+pre_init = []
+pre_remove = []
+
+# Optional global per-project hooks:
+# [workspace.hooks.projects.aiw]
+# pre_init = []
+# pre_remove = []

@@ -1,0 +1,15 @@
+git:
+  pagers:
+    - pager: delta --dark --paging=never --line-numbers
+      colorArg: always
+customCommands:
+  - key: '<c-a>'
+    context: 'global'
+    description: 'AI commit staged changes'
+    prompts:
+      - type: 'input'
+        title: 'Additional AI commit prompt (optional)'
+        key: 'AIWCommitPrompt'
+        initialValue: ''
+    command: 'aiw commit --prompt {{.Form.AIWCommitPrompt | quote}}'
+    output: terminal

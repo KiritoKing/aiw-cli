@@ -1,0 +1,24 @@
+[agents.codex]
+cmd = "codex"
+args = []
+commit_args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"]
+
+[agents.claude]
+cmd = "claude"
+args = []
+commit_args = ["--print"]
+
+[agents.opencode]
+cmd = "opencode"
+args = []
+commit_args = ["run", "{{prompt}}"]
+
+[agents.gemini]
+cmd = "gemini"
+args = []
+commit_args = ["--prompt", "{{prompt}}"]
+
+[agents.aider]
+cmd = "aider"
+args = []
+commit_args = ["--message", "{{prompt}}"]
