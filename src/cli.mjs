@@ -117,8 +117,8 @@ async function commandCmuxNew(config, argv, commandName) {
   const agentFromArgs = commandName === "new"
     ? flags.positionals[1]
     : flags.positionals.find((item) => isKnownAgent(config, item));
-  if (flags.local && (flags.branch || branchFromArgs || flags.create)) {
-    const error = new Error("--local cannot be combined with --branch, a branch argument, or --create");
+  if (flags.local && (flags.branch || branchFromArgs || flags.create || flags.base)) {
+    const error = new Error("--local cannot be combined with --branch, a branch argument, --create, or --base");
     error.exitCode = 2;
     throw error;
   }
@@ -129,7 +129,8 @@ async function commandCmuxNew(config, argv, commandName) {
   const branchSelection = flags.local
     ? { local: true }
     : await selectBranch(repo, flags.branch || branchFromArgs, {
-        forceCreate: flags.create
+        forceCreate: flags.create,
+        baseBranch: flags.base
       });
   const agent = await selectAgent(config, flags.agent || agentFromArgs);
 
@@ -152,7 +153,7 @@ async function commandCmuxNew(config, argv, commandName) {
 
   const layoutCommand = `${quoteShell(aiwBinPath())} layout --agent ${quoteShell(agent.name)}`;
   const wtArgs = branchSelection.create
-    ? ["switch", "--create", branchSelection.branch, "--base", "@", "-x", layoutCommand]
+    ? ["switch", "--create", branchSelection.branch, "--base", branchSelection.baseBranch || "@", "-x", layoutCommand]
     : ["switch", branchSelection.branch, "-x", layoutCommand];
   if (flags.dryRun) {
     console.log(`cd ${quoteShell(repo)} && wt ${wtArgs.map(quoteShell).join(" ")}`);
@@ -325,6 +326,10 @@ function parseFlags(argv) {
       case "--branch":
         flags.branch = argv[++index];
         break;
+      case "--base":
+      case "--from":
+        flags.base = argv[++index];
+        break;
       case "--repo":
         flags.repo = argv[++index];
         break;
@@ -410,7 +415,7 @@ function printHelp() {
 Commands:
   init [--cmux-scope <home|code|none>] [--code-root <path>] [--config-dir <path>] [--dry-run]
   doctor [--json] [--gate <p0|init|layout|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
-  cmux-new [--branch <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
+  cmux-new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
   layout [--agent <name>] [--print-json] [--dry-run]
   workspace|ws <list|open|done|remove|gc> [options]
   commit [--agent <name>] [--prompt <text>] [--prompt-file <path>] [--retries <n>] [--dry-run] [--print-prompt]

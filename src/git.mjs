@@ -86,19 +86,7 @@ export function currentBranch(repo) {
 }
 
 export function branchExists(repo, branch) {
-  if (!branch) {
-    return false;
-  }
-  const local = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repo });
-  if (local.ok) {
-    return true;
-  }
-  const remote = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/remotes/${branch}`], { cwd: repo });
-  if (remote.ok) {
-    return true;
-  }
-  const originRemote = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { cwd: repo });
-  return originRemote.ok;
+  return Boolean(resolveBranchRef(repo, branch));
 }
 
 export function listBranches(repo) {
@@ -115,19 +103,34 @@ export function listBranches(repo) {
 
 export async function selectBranch(repo, requestedBranch, options = {}) {
   const current = currentBranch(repo);
+  const requestedBase = options.baseBranch || "";
+  const baseBranch = requestedBase ? resolveBranchRef(repo, requestedBase) : "";
+  if (requestedBase && !baseBranch) {
+    throw withExit(`base branch not found: ${requestedBase}`, 4);
+  }
   if (requestedBranch) {
-    const create = options.forceCreate || !branchExists(repo, requestedBranch);
+    const branchAlreadyExists = branchExists(repo, requestedBranch);
+    const create = options.forceCreate || !branchAlreadyExists;
+    if (requestedBase && !create) {
+      throw withExit(`--base can only be used when creating a new branch: ${requestedBranch} already exists`, 2);
+    }
     return {
       branch: requestedBranch,
       create,
-      targetBranch: create ? current : ""
+      baseBranch: create ? baseBranch || "@" : "",
+      targetBranch: create ? requestedBase || current : ""
     };
   }
 
   const branches = listBranches(repo).filter((branch) => branch !== current);
+  if (requestedBase) {
+    return createBranchSelection(repo, baseBranch, requestedBase);
+  }
+
   const createChoice = "Create new branch from current HEAD...";
+  const createFromBranchChoice = "Create new branch from existing branch...";
   const localChoice = "Open current checkout...";
-  const selected = await pickFromList("Select worktree", [createChoice, localChoice, ...branches], {
+  const selected = await pickFromList("Select worktree", [createChoice, createFromBranchChoice, localChoice, ...branches], {
     defaultItem: createChoice
   });
   if (selected === localChoice) {
@@ -136,21 +139,46 @@ export async function selectBranch(repo, requestedBranch, options = {}) {
     };
   }
   if (selected !== createChoice) {
+    if (selected === createFromBranchChoice) {
+      const base = await pickFromList("Base branch", listBranches(repo), {
+        defaultItem: current
+      });
+      return createBranchSelection(repo, resolveBranchRef(repo, base), base);
+    }
     return {
       branch: selected,
       create: false
     };
   }
 
+  return {
+    ...(await promptNewBranch()),
+    create: true,
+    baseBranch: "@",
+    targetBranch: current
+  };
+}
+
+async function createBranchSelection(repo, baseBranch, targetBranch) {
+  if (!baseBranch) {
+    throw withExit(`base branch not found: ${targetBranch}`, 4);
+  }
+  return {
+    ...(await promptNewBranch()),
+    create: true,
+    baseBranch,
+    targetBranch
+  };
+}
+
+async function promptNewBranch() {
   const { askInput } = await import("./prompt.mjs");
   const branch = await askInput("New branch");
   if (!branch) {
     throw withExit("branch is required", 4);
   }
   return {
-    branch,
-    create: true,
-    targetBranch: current
+    branch
   };
 }
 
@@ -196,6 +224,22 @@ function listRefs(repo, refPath) {
   } catch {
     return [];
   }
+}
+
+function resolveBranchRef(repo, branch) {
+  if (!branch) {
+    return "";
+  }
+  const local = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repo });
+  if (local.ok) {
+    return branch;
+  }
+  const remote = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/remotes/${branch}`], { cwd: repo });
+  if (remote.ok) {
+    return branch;
+  }
+  const originRemote = tryCapture("git", ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { cwd: repo });
+  return originRemote.ok ? `origin/${branch}` : "";
 }
 
 function isInside(child, parent) {

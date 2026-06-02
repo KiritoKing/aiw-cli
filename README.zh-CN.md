@@ -309,6 +309,7 @@ aiw cmux-new --agent codex
 aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex
+aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --base main --agent codex
 aiw cmux-new --local --agent codex
 ```
 
@@ -316,8 +317,9 @@ aiw cmux-new --local --agent codex
 
 - 能识别当前 Git repo 时，默认使用当前 repo。
 - `--pick-repo` 可以选择 `paths.code_root` 下的其他 repo。
-- TTY 中没有传 branch 时，AIW 会让你选择从当前 `HEAD` 创建新分支、打开当前 checkout、或选择已有分支。
+- TTY 中没有传 branch 时，AIW 会让你选择从当前 `HEAD` 创建新分支、从已有 branch 创建新分支、打开当前 checkout、或选择已有分支。
 - 创建新分支时运行 `wt switch --create <branch> --base @ -x "aiw layout --agent <agent>"`。
+- 从已有 branch 创建新分支时运行 `wt switch --create <branch> --base <base> -x "aiw layout --agent <agent>"`；非交互使用 `--branch <new-branch> --base <branch>` 或 `--from <branch>`。
 - 选择已有分支时运行 `wt switch <branch> -x "aiw layout --agent <agent>"`。
 - `--local` 在当前 checkout 打开标准 layout，不创建 Worktrunk worktree。
 - `--dry-run` 打印将要运行的命令。
