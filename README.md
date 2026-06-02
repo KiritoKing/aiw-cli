@@ -309,6 +309,7 @@ aiw cmux-new --agent codex
 aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex
+aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --base main --agent codex
 aiw cmux-new --local --agent codex
 ```
 
@@ -316,8 +317,9 @@ Behavior:
 
 - The current Git repository is used automatically when possible.
 - `--pick-repo` lets you select another repository under `paths.code_root`.
-- Without a branch in a TTY, AIW lets you create a new branch from current `HEAD`, open the current checkout, or choose an existing branch.
+- Without a branch in a TTY, AIW lets you create a new branch from current `HEAD`, create a new branch from an existing branch, open the current checkout, or choose an existing branch.
 - Creating a new branch runs `wt switch --create <branch> --base @ -x "aiw layout --agent <agent>"`.
+- Creating a new branch from an existing branch runs `wt switch --create <branch> --base <base> -x "aiw layout --agent <agent>"`; pass `--base <branch>` or `--from <branch>` with `--branch <new-branch>` to do this non-interactively.
 - Selecting an existing branch runs `wt switch <branch> -x "aiw layout --agent <agent>"`.
 - `--local` opens the standard layout in the current checkout without creating a Worktrunk worktree.
 - `--dry-run` prints the command that would be run.
