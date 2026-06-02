@@ -1,0 +1,188 @@
+---
+name: aiw-reference
+description: Operate the AIW CLI directly for workspace automation, Git review, diff inspection, AI commits, cmux layout launching, Worktrunk worktree lifecycle, workspace garbage collection, and finishing feature branches. Use when the user asks an agent to run AIW commands, clean workspaces, merge back to a target branch, open or create AIW workspaces, automate AIW flows, or explain AIW command behavior.
+---
+
+# AIW Reference
+
+## Purpose
+
+Use AIW as the orchestration layer around existing terminal tools. AIW decides the workflow path, runs dependency gates, and delegates to Worktrunk, cmux, lazygit, delta, yazi, nvim, Git, and agent CLIs.
+
+## Operating Rules
+
+- Run real state checks before making lifecycle changes. Prefer `aiw doctor`, `git status --short`, and `aiw workspace list` as the first evidence.
+- Treat these as high-impact operations: `aiw workspace done`, `aiw workspace remove`, `aiw workspace gc --apply`, `aiw workspace gc --yes`, and any `--force` use.
+- Use dry-run or preview modes when available before applying changes. `gc --dry-run` is the default safe way to inspect cleanup.
+- Do not run `aiw done` from the main checkout. It is only valid inside a feature worktree and refuses dirty worktrees.
+- Do not silently stage files for `aiw commit`. AIW commit reads staged changes only; the user or agent must intentionally stage changes first.
+- Keep personal AIW workflow files out of business repositories unless the user explicitly asks for project-local config.
+
+## Resolve the AIW Command
+
+Use the installed `aiw` binary for normal workspace operations:
+
+```bash
+aiw --help
+```
+
+Use `npx @chlrc/aiw ...` for first-run or one-off package-based access:
+
+```bash
+npx @chlrc/aiw doctor
+```
+
+Use a local checkout only when developing or deeply customizing AIW itself:
+
+```bash
+node bin/aiw --help
+```
+
+## Read-Only Orientation
+
+Start with the smallest useful checks:
+
+```bash
+aiw doctor
+aiw doctor --gate workspace
+git status --short
+aiw workspace list
+aiw workspace list --json
+aiw workspace states
+```
+
+Use `--json` when automating decisions. The workspace table combines Worktrunk, Git, cmux, target-branch, merge-state, age, dirty, and GC signals.
+
+## Open or Create Workspaces
+
+Create or switch to a worktree and open the standard four-pane cmux layout:
+
+```bash
+aiw cmux-new --agent codex
+aiw cmux-new --pick-repo --agent codex
+aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
+aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --base main --agent codex --dry-run
+aiw cmux-new --local --agent codex
+```
+
+Behavior:
+
+- New branch from current `HEAD`: `wt switch --create <branch> --base @ -x "aiw layout --agent <agent>"`.
+- New branch from a base branch: pass `--base <branch>` or `--from <branch>`.
+- Existing branch: `wt switch <branch> -x "aiw layout --agent <agent>"`.
+- Current checkout without Worktrunk: `--local`.
+
+Open an existing workspace or branch:
+
+```bash
+aiw workspace open feat/foo --agent codex --dry-run
+aiw workspace open /path/to/worktree --agent codex --dry-run
+aiw open feat/foo --agent codex
+```
+
+## Review, Diff, and Commit
+
+Use AIW surfaces without replacing native tool responsibilities:
+
+```bash
+aiw git
+aiw diff
+aiw diff --watch
+aiw diff --staged
+aiw files
+aiw edit src/file.ts:10
+aiw grep keyword
+aiw tree 3
+```
+
+Commit flow:
+
+```bash
+git status --short
+git add <path>
+aiw commit --agent codex --dry-run
+aiw commit --agent codex
+```
+
+`aiw git` opens lazygit with the AIW overlay. In that lazygit session, `Ctrl-A` triggers `aiw commit --prompt ...` for staged changes while leaving native lazygit commit behavior available.
+
+## Finish a Feature Worktree
+
+Use this flow when the user asks to merge a feature workspace back to a target branch:
+
+```bash
+git status --short
+aiw workspace list
+aiw workspace done dev --no-close-cmux
+```
+
+Rules:
+
+- Run from the feature worktree, not the main workspace.
+- Continue only when `git status --short` is empty.
+- Pass an explicit target such as `dev`, `main`, or `master` when the recorded AIW target is unclear.
+- Omit `--no-close-cmux` when the user wants the matching cmux workspace closed after a successful Worktrunk merge.
+
+Short alias:
+
+```bash
+aiw done dev
+```
+
+## Garbage-Collect Workspaces
+
+Preview first:
+
+```bash
+aiw workspace gc --dry-run
+aiw workspace gc --json
+```
+
+AIW GC separates signals:
+
+- `dirty`: blocks automatic cleanup.
+- `merged`: branch is integrated, same commit, empty, or known contained by a target.
+- `stale`: last commit age exceeds `workspace.stale_seconds`; stale alone does not make a workspace removable.
+
+Only clean, merged, non-current workspaces are removable. Stale dirty or unmerged workspaces are warnings only.
+
+Apply only when the user wants cleanup:
+
+```bash
+aiw workspace gc --apply
+aiw workspace gc --yes
+```
+
+Short aliases:
+
+```bash
+aiw gc --dry-run
+aiw clean --dry-run
+```
+
+## Remove a Specific Workspace
+
+Use removal for a named target after checking state:
+
+```bash
+aiw workspace list
+aiw workspace remove feat/foo
+```
+
+`remove` performs a dirty check before calling Worktrunk. Use `--force` only when the user explicitly intends to hand the decision to Worktrunk:
+
+```bash
+aiw workspace remove feat/foo --force
+```
+
+## Automation Pattern
+
+For agent-run automation, report the exact evidence and command sequence:
+
+1. Show the current repo/worktree state.
+2. Show the AIW preview or dry-run output when available.
+3. State which operation is about to mutate worktrees, commits, or cmux.
+4. Run the apply command only when the user has authorized that operation.
+5. Verify with `aiw workspace list`, `git status --short`, or the relevant `doctor` gate.
+
+Do not stop at a single local command if the user's request is an end-to-end AIW workflow. Carry the task through state inspection, action, verification, and a concise result.

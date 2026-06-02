@@ -22,20 +22,22 @@ The result is a CLI that keeps a personal workflow consistent without turning it
 
 ## Quick Start
 
-From this checkout:
-
-```bash
-node bin/aiw --help
-node bin/aiw doctor
-node bin/aiw cmux-new --agent codex
-```
-
-Bootstrap with the published package, then use the installed `aiw` binary:
+Bootstrap with the published package first. Users do not need to clone this repository to start using AIW:
 
 ```bash
 npx @chlrc/aiw init
 aiw doctor
 aiw cmux-new --agent codex
+```
+
+Using `npx @chlrc/aiw ...` is a good first-run path. For frequent use, install the package or pull a local checkout so command startup and local customization are easier.
+
+From a local checkout, mostly for AIW development:
+
+```bash
+node bin/aiw --help
+node bin/aiw doctor
+node bin/aiw cmux-new --agent codex
 ```
 
 The normal daily loop is:
@@ -89,6 +91,29 @@ AIW reads configuration from:
 3. The repository default [config/](./config) directory.
 
 This lets the repo provide a usable default while still allowing a personal config directory outside business repositories.
+
+## Agent Skills
+
+AIW ships agent skills in the npm `skills` CLI-compatible multi-skill layout:
+
+- [skills/aiw-init](./skills/aiw-init/SKILL.md): bootstrap and troubleshoot AIW setup.
+- [skills/aiw-reference](./skills/aiw-reference/SKILL.md): operate AIW workspace, Git, commit, done, remove, and GC workflows.
+
+The intended user path is package-based, not clone-based. After the AIW npm package is published with these skill folders, install skills from the package source:
+
+```bash
+npx --yes skills add @chlrc/aiw --list -y
+npx --yes skills add @chlrc/aiw --skill aiw-init -y
+npx --yes skills add @chlrc/aiw --skill aiw-reference -y
+```
+
+Maintainers can validate the checked-out repository before publishing:
+
+```bash
+npx --yes skills add . --list -y
+```
+
+`aiw init` does not install these skills yet; it only initializes AIW config and cmux integration.
 
 ## Init
 

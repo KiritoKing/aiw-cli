@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIW Init"
+  short_description: "Bootstrap and troubleshoot AIW setup"
+  default_prompt: "Use $aiw-init to initialize AIW on this machine and explain any dependency blockers."
