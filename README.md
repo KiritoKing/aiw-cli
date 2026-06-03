@@ -278,6 +278,7 @@ aiw workspace open feat/foo --agent codex
 ```bash
 aiw doctor
 aiw cmux-new --agent codex
+aiw new --agent codex
 aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --local --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
@@ -313,7 +314,10 @@ Short workspace aliases are kept for daily use:
 
 ```bash
 aiw ws list
+aiw ws ls
 aiw list
+aiw ls
+aiw als
 aiw open feat/foo
 aiw switch feat/foo
 aiw done
@@ -324,13 +328,15 @@ aiw clean
 
 ## Worktree and cmux Workflow
 
-`aiw cmux-new` is the main entrypoint for new work.
+`aiw cmux-new` is the main entrypoint for new work. `aiw new` and `aiw cmux new` are aliases for the same command.
 
 Common forms:
 
 ```bash
 aiw cmux-new
+aiw new
 aiw cmux-new --agent codex
+aiw new --agent codex
 aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex
@@ -406,11 +412,13 @@ In a TTY, `workspace open` without a target opens a searchable picker over exist
 aiw workspace done
 aiw workspace done dev
 aiw workspace done dev --agent codex
+aiw workspace done dev --retries 3
+aiw workspace done dev --agent codex --retries 3
 aiw workspace done dev --no-close-cmux
 aiw done dev
 ```
 
-`done` is only allowed from a feature worktree. It refuses to run from the main workspace. It also refuses to proceed when the current worktree is dirty.
+`done` is only allowed from a feature worktree. It refuses to run from the main workspace. It also refuses to proceed when the current worktree is dirty, or when the selected target branch is checked out in another dirty worktree.
 
 When it proceeds, AIW delegates the merge and cleanup to Worktrunk:
 
@@ -426,7 +434,7 @@ WORKTRUNK_COMMIT__GENERATION__COMMAND="<aiw> commit-message --agent <agent>" wt 
 
 This avoids Worktrunk's plain fallback squash subject, which can fail Conventional Commit hooks in business repositories. Pass `--agent <name>` to choose the AIW commit agent for the squash message. Existing Worktrunk commit-generation config and explicit Worktrunk environment variables are respected.
 
-If AIW recorded a target when the worktree was created, bare `aiw done` can use that target. In a TTY it opens a target picker when needed. After a successful merge, AIW closes the matching cmux workspace unless `--no-close-cmux` is passed.
+If AIW recorded a target when the worktree was created, bare `aiw done` can use that target. In a TTY it opens a target picker when needed. `done` retries failed `wt merge` attempts up to `commit.retries` times, defaulting to 3, and restores the source worktree, target branch, and Worktrunk backup ref after each failed attempt. After a successful merge, AIW closes the matching cmux workspace unless `--no-close-cmux` is passed.
 
 ### Remove and GC
 

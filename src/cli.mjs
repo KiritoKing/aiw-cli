@@ -12,7 +12,7 @@ import { commandExists, quoteShell, runInherit, sleep } from "./run.mjs";
 import { commandWorkspace, recordWorkspaceTarget } from "./workspace.mjs";
 
 export async function main(argv) {
-  const command = argv[0] || "help";
+  const command = normalizeCommand(argv[0] || "help");
   const rest = argv.slice(1);
   const config = loadConfig();
 
@@ -32,6 +32,12 @@ export async function main(argv) {
     case "new":
       await commandCmuxNew(config, rest, command);
       return;
+    case "cmux":
+      if (normalizeCommand(rest[0] || "") === "new") {
+        await commandCmuxNew(config, rest.slice(1), "cmux-new");
+        return;
+      }
+      break;
     case "layout":
       await commandLayout(config, rest);
       return;
@@ -46,6 +52,8 @@ export async function main(argv) {
       await commandWorkspace(config, ["open", ...rest]);
       return;
     case "list":
+    case "ls":
+    case "als":
       await commandWorkspace(config, ["list", ...rest]);
       return;
     case "done":
@@ -86,12 +94,11 @@ export async function main(argv) {
     case "tree":
       await commandTree(config, rest);
       return;
-    default: {
-      const error = new Error(`unknown command: ${command}`);
-      error.exitCode = 2;
-      throw error;
-    }
   }
+
+  const error = new Error(`unknown command: ${command}`);
+  error.exitCode = 2;
+  throw error;
 }
 
 async function commandDoctor(config, argv) {
@@ -117,9 +124,7 @@ async function commandCmuxNew(config, argv, commandName) {
   const branchFromArgs = flags.positionals[0] && !isKnownAgent(config, flags.positionals[0])
     ? flags.positionals[0]
     : "";
-  const agentFromArgs = commandName === "new"
-    ? flags.positionals[1]
-    : flags.positionals.find((item) => isKnownAgent(config, item));
+  const agentFromArgs = flags.positionals.find((item) => isKnownAgent(config, item));
   if (flags.local && (flags.branch || branchFromArgs || flags.create || flags.base)) {
     const error = new Error("--local cannot be combined with --branch, a branch argument, --create, or --base");
     error.exitCode = 2;
@@ -425,14 +430,18 @@ function printHelp() {
 Commands:
   init [--cmux-scope <home|code|none>] [--code-root <path>] [--config-dir <path>] [--dry-run]
   doctor [--json] [--gate <p0|init|layout|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
-  cmux-new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
+  cmux-new|new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
   layout [--agent <name>] [--print-json] [--dry-run]
   workspace|ws <list|open|done|remove|gc> [options]
   commit [--agent <name>] [--prompt <text>] [--prompt-file <path>] [--retries <n>] [--dry-run] [--print-prompt]
   commit-message [--agent <name>] [--prompt <text>]
-  open | switch | list | done | remove | gc | clean
+  open | switch | list | ls | als | done | remove | gc | clean
   diff [--watch] [--staged] [--all]
   git | files [path] | edit <file[:line]> | grep <query> | pick | tree [depth]
 
 Main workflow commands run dependency gates before creating worktrees or opening cmux layouts.`);
+}
+
+function normalizeCommand(command) {
+  return String(command || "").toLowerCase();
 }
