@@ -99,12 +99,12 @@ AIW ships agent skills in the npm `skills` CLI-compatible multi-skill layout:
 - [skills/aiw-init](./skills/aiw-init/SKILL.md): bootstrap and troubleshoot AIW setup.
 - [skills/aiw-reference](./skills/aiw-reference/SKILL.md): operate AIW workspace, Git, commit, done, remove, and GC workflows.
 
-The intended user path is package-based, not clone-based. After the AIW npm package is published with these skill folders, install skills from the package source:
+The current `skills add` flow consumes Git/GitHub sources, so users can install the AIW skills from this repository without cloning it first:
 
 ```bash
-npx --yes skills add @chlrc/aiw --list -y
-npx --yes skills add @chlrc/aiw --skill aiw-init -y
-npx --yes skills add @chlrc/aiw --skill aiw-reference -y
+npx --yes skills add KiritoKing/aiw-cli --list -y
+npx --yes skills add KiritoKing/aiw-cli --skill aiw-init -y
+npx --yes skills add KiritoKing/aiw-cli --skill aiw-reference -y
 ```
 
 Maintainers can validate the checked-out repository before publishing:
@@ -405,6 +405,7 @@ In a TTY, `workspace open` without a target opens a searchable picker over exist
 ```bash
 aiw workspace done
 aiw workspace done dev
+aiw workspace done dev --agent codex
 aiw workspace done dev --no-close-cmux
 aiw done dev
 ```
@@ -416,6 +417,14 @@ When it proceeds, AIW delegates the merge and cleanup to Worktrunk:
 ```bash
 wt merge <target>
 ```
+
+Worktrunk squashes by default. If Worktrunk does not already have a `[commit.generation] command` or `WORKTRUNK_COMMIT__GENERATION__COMMAND`, AIW injects its own commit-message bridge for the merge:
+
+```bash
+WORKTRUNK_COMMIT__GENERATION__COMMAND="<aiw> commit-message --agent <agent>" wt merge <target>
+```
+
+This avoids Worktrunk's plain fallback squash subject, which can fail Conventional Commit hooks in business repositories. Pass `--agent <name>` to choose the AIW commit agent for the squash message. Existing Worktrunk commit-generation config and explicit Worktrunk environment variables are respected.
 
 If AIW recorded a target when the worktree was created, bare `aiw done` can use that target. In a TTY it opens a target picker when needed. After a successful merge, AIW closes the matching cmux workspace unless `--no-close-cmux` is passed.
 
@@ -508,6 +517,7 @@ aiw commit --prompt "Use scope aiw"
 aiw commit --prompt-file ~/commit-style.md
 aiw commit --print-prompt
 aiw commit --dry-run
+aiw commit-message --agent codex < prompt.txt
 ```
 
 Flow:
@@ -519,6 +529,8 @@ Flow:
 5. Clean the agent output into a commit message.
 6. Run `git commit -F -`.
 7. If commit hooks fail, include the hook output in the next prompt and retry up to `commit.retries`.
+
+`aiw commit-message` is the stdin-to-stdout message generator used by `aiw done` when bridging Worktrunk squash commit generation. It does not create a Git commit.
 
 The agent adapter contract is stdin/stdout oriented:
 

@@ -255,6 +255,7 @@ async function workspaceDone(config, argv) {
   }
   const closeTarget = flags.closeCmux ? cmuxWorkspaceRefForPath(repo) : "";
   const mergeArgs = await withSelectedMergeTarget(repo, flags.passthrough);
+  const mergeEnv = worktrunkMergeEnv(config, repo, flags);
   await runWorkspaceHook(config, "pre_remove", {
     repo,
     cwd: repo,
@@ -262,7 +263,7 @@ async function workspaceDone(config, argv) {
     branch: currentBranch(repo),
     target: mergeTarget(mergeArgs)
   });
-  await runInherit("wt", ["merge", ...mergeArgs], { cwd: repo });
+  await runInherit("wt", ["merge", ...mergeArgs], { cwd: repo, env: mergeEnv });
   if (closeTarget) {
     closeCmuxWorkspace(closeTarget);
   }
@@ -1098,6 +1099,70 @@ function hasDryRunFlag(argv) {
   return argv.includes("--dry-run");
 }
 
+function worktrunkMergeEnv(config, repo, flags) {
+  if (!mergeNeedsCommitGeneration(flags.passthrough)) {
+    return process.env;
+  }
+  if (process.env.WORKTRUNK_COMMIT__GENERATION__COMMAND) {
+    return process.env;
+  }
+  if (worktrunkCommitGenerationConfigured(repo, flags.passthrough)) {
+    return process.env;
+  }
+
+  const agent = resolveAgent(config, flags.agent || config.commit.agent || config.defaults.agent);
+  assertGate("commit", config, agent);
+  const command = `${quoteShell(aiwBinPath())} commit-message --agent ${quoteShell(agent.name)}`;
+  return {
+    ...process.env,
+    WORKTRUNK_COMMIT__GENERATION__COMMAND: command
+  };
+}
+
+function mergeNeedsCommitGeneration(argv) {
+  return !argv.includes("--no-squash") && !argv.includes("--no-commit");
+}
+
+function worktrunkCommitGenerationConfigured(repo, argv) {
+  const result = tryCapture("wt", ["config", "show", "--format", "json", ...worktrunkConfigArgs(argv)], { cwd: repo });
+  if (!result.ok || !result.stdout) {
+    return false;
+  }
+  try {
+    const config = JSON.parse(result.stdout);
+    return Boolean(
+      commitGenerationCommand(config.user?.config) ||
+      commitGenerationCommand(config.project?.config) ||
+      commitGenerationCommand(config.system?.config)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function worktrunkConfigArgs(argv) {
+  const args = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--config" && argv[index + 1]) {
+      args.push("--config", argv[index + 1]);
+      index += 1;
+    } else if (arg.startsWith("--config=")) {
+      args.push("--config", arg.slice("--config=".length));
+    }
+  }
+  return args;
+}
+
+function commitGenerationCommand(config) {
+  if (!config || typeof config !== "object") {
+    return "";
+  }
+  return stringValue(config.commit?.generation?.command) ||
+    stringValue(config["commit.generation"]?.command) ||
+    stringValue(config["commit.generation.command"]);
+}
+
 async function withSelectedMergeTarget(repo, argv) {
   if (mergeTarget(argv)) {
     return argv;
@@ -1345,13 +1410,19 @@ function parseWorkspaceFlags(argv) {
 function parseDoneFlags(argv) {
   const flags = {
     closeCmux: true,
+    agent: "",
     passthrough: []
   };
-  for (const arg of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
     if (arg === "--no-close-cmux") {
       flags.closeCmux = false;
     } else if (arg === "--close-cmux") {
       flags.closeCmux = true;
+    } else if (arg === "--agent") {
+      flags.agent = argv[++index] || "";
+    } else if (arg.startsWith("--agent=")) {
+      flags.agent = arg.slice("--agent=".length);
     } else {
       flags.passthrough.push(arg);
     }
@@ -1403,7 +1474,8 @@ Commands:
   status [--json]                             Alias for list
   open [target] [--agent name] [--remotes]    Open picker or target with the AIW cmux layout
   switch [target]                             Alias for open
-  done [target] [--no-close-cmux]             Merge the current feature worktree, cleanup, then close cmux workspace
+  done [target] [--agent name] [--no-close-cmux]
+                                               Merge the current feature worktree, cleanup, then close cmux workspace
   remove [wt-remove-args...]                  Remove worktrees after dirty check
   gc|clean [--dry-run] [--apply|--yes] [--json] [--stale-seconds n]
                                                Preview or remove safe worktrees; stale warnings are not removed

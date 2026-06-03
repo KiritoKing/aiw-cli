@@ -83,6 +83,37 @@ export async function runCommit(config, flags) {
   throw withExit(`git commit failed after ${retries} attempts`, 8);
 }
 
+export function runCommitMessage(config, flags) {
+  const prompt = flags.prompt || readStdin();
+  if (!prompt.trim()) {
+    throw withExit("commit-message prompt is required on stdin or via --prompt", 2);
+  }
+  const repo = capture("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() });
+  const message = generateCommitMessage(config, flags, prompt, repo);
+  console.log(message);
+}
+
+function generateCommitMessage(config, flags, prompt, repo) {
+  const agent = resolveAgent(config, flags.agent || config.commit.agent || config.defaults.agent);
+  const agentResult = runAgentForText(agent, prompt, { cwd: repo });
+  if (!agentResult.ok) {
+    throw withExit(
+      [
+        `agent '${agent.name}' failed while generating commit message`,
+        agentResult.stderr.trim(),
+        agentResult.stdout.trim()
+      ].filter(Boolean).join("\n"),
+      agentResult.status || 1
+    );
+  }
+
+  const message = cleanAgentText(agentResult.stdout);
+  if (!message) {
+    throw withExit(`agent '${agent.name}' returned an empty commit message`, 7);
+  }
+  return message;
+}
+
 function readStagedDiff(config, repo) {
   const diff = capture("git", ["diff", "--cached", "--no-ext-diff"], { cwd: repo });
   const statResult = tryCapture("git", ["diff", "--cached", "--stat"], { cwd: repo });
@@ -95,6 +126,14 @@ function readStagedDiff(config, repo) {
     stat: statResult.ok ? statResult.stdout : "",
     status: statusResult.ok ? statusResult.stdout : ""
   };
+}
+
+function readStdin() {
+  try {
+    return fs.readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function buildCommitPrompt({ basePrompt, staged, attempt, retries, lastFailure }) {
