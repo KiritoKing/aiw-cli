@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expandHome, loadConfig, resolveAgent, aiwBinPath } from "./config.mjs";
-import { runCommit } from "./commit.mjs";
+import { runCommit, runCommitMessage } from "./commit.mjs";
 import { assertGate, printDoctor } from "./deps.mjs";
 import { assertGitRoot, gitRoot, isDirty, resolveRepo, selectBranch } from "./git.mjs";
 import { runWorkspaceHook } from "./hooks.mjs";
@@ -63,6 +63,9 @@ export async function main(argv) {
       return;
     case "commit":
       await commandCommit(config, rest);
+      return;
+    case "commit-message":
+      await commandCommitMessage(config, rest);
       return;
     case "git":
       await commandGit(config, rest);
@@ -239,6 +242,13 @@ async function commandCommit(config, argv) {
   const agent = resolveAgent(config, flags.agent || config.commit.agent || config.defaults.agent);
   assertGate("commit", config, agent);
   await runCommit(config, flags);
+}
+
+async function commandCommitMessage(config, argv) {
+  const flags = parseFlags(argv);
+  const agent = resolveAgent(config, flags.agent || config.commit.agent || config.defaults.agent);
+  assertGate("commit", config, agent);
+  runCommitMessage(config, flags);
 }
 
 function resolveConfigFile(config, value) {
@@ -419,6 +429,7 @@ Commands:
   layout [--agent <name>] [--print-json] [--dry-run]
   workspace|ws <list|open|done|remove|gc> [options]
   commit [--agent <name>] [--prompt <text>] [--prompt-file <path>] [--retries <n>] [--dry-run] [--print-prompt]
+  commit-message [--agent <name>] [--prompt <text>]
   open | switch | list | done | remove | gc | clean
   diff [--watch] [--staged] [--all]
   git | files [path] | edit <file[:line]> | grep <query> | pick | tree [depth]
