@@ -23,10 +23,12 @@ const ANSI = {
 };
 
 export async function commandWorkspace(config, argv) {
-  const subcommand = argv[0] || "list";
+  const subcommand = normalizeCommand(argv[0] || "list");
   const rest = argv.slice(1);
   switch (subcommand) {
     case "list":
+    case "ls":
+    case "als":
     case "status":
       await workspaceList(config, rest);
       return;
@@ -255,18 +257,230 @@ async function workspaceDone(config, argv) {
   }
   const closeTarget = flags.closeCmux ? cmuxWorkspaceRefForPath(repo) : "";
   const mergeArgs = await withSelectedMergeTarget(repo, flags.passthrough);
+  const target = mergeTarget(mergeArgs) || defaultDoneTarget(repo);
+  assertTargetWorktreeClean(repo, target);
+  const retries = doneRetryCount(config, flags);
+  const restorePlan = createDoneRestorePlan(repo, currentBranch(repo), target);
   const mergeEnv = worktrunkMergeEnv(config, repo, flags);
   await runWorkspaceHook(config, "pre_remove", {
     repo,
     cwd: repo,
     workspacePath: repo,
-    branch: currentBranch(repo),
-    target: mergeTarget(mergeArgs)
+    branch: restorePlan.sourceBranch,
+    target
   });
-  await runInherit("wt", ["merge", ...mergeArgs], { cwd: repo, env: mergeEnv });
+  await runMergeWithRetry(repo, mergeArgs, retries, restorePlan, mergeEnv);
   if (closeTarget) {
     closeCmuxWorkspace(closeTarget);
   }
+}
+
+async function runMergeWithRetry(repo, mergeArgs, retries, restorePlan, mergeEnv) {
+  let lastError = null;
+  let lastRestore = null;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    console.log(`[aiw done] merge attempt ${attempt}/${retries}`);
+    try {
+      await runInherit("wt", ["merge", ...mergeArgs], { cwd: repo, env: mergeEnv });
+      return;
+    } catch (error) {
+      lastError = error;
+      lastRestore = restoreDoneAttempt(restorePlan);
+      if (!lastRestore.ok) {
+        throw withExit(
+          [
+            `aiw workspace done failed and rollback was incomplete after attempt ${attempt}/${retries}`,
+            lastRestore.summary
+          ].filter(Boolean).join("\n"),
+          error.exitCode || 1
+        );
+      }
+      if (attempt < retries) {
+        console.error(`[aiw done] merge failed; restored workspace state and retrying (${attempt + 1}/${retries})`);
+      }
+    }
+  }
+
+  throw withExit(
+    [
+      `aiw workspace done failed after ${retries} attempt(s)`,
+      lastRestore?.summary || "",
+      lastError?.message ? `last error: ${lastError.message}` : ""
+    ].filter(Boolean).join("\n"),
+    lastError?.exitCode || 1
+  );
+}
+
+function assertTargetWorktreeClean(repo, targetBranch) {
+  const targetPath = worktreePathForBranch(repo, targetBranch);
+  if (!targetPath || normalizePath(targetPath) === normalizePath(repo) || !isDirty(targetPath)) {
+    return;
+  }
+  const error = new Error(`target worktree has uncommitted changes: ${targetPath}; clean or stash it before aiw workspace done`);
+  error.exitCode = 5;
+  throw error;
+}
+
+function doneRetryCount(config, flags) {
+  const value = flags.retries === undefined
+    ? Number(config.commit?.retries || 3)
+    : flags.retries;
+  if (!Number.isFinite(value) || value < 1) {
+    const error = new Error("--retries must be a positive number");
+    error.exitCode = 2;
+    throw error;
+  }
+  return Math.floor(value);
+}
+
+function createDoneRestorePlan(repo, sourceBranch, targetBranch) {
+  const worktrees = readGitWorktreeList(repo);
+  const sourcePath = normalizePath(repo);
+  const targetWorktree = worktreePathForBranchFromEntries(worktrees, targetBranch);
+  const targetRef = localBranchRef(repo, targetBranch);
+  const backupRef = sourceBranch ? `refs/wt-backup/${sourceBranch}` : "";
+  const backupHead = backupRef ? gitHead(repo, backupRef) : "";
+  return {
+    sourcePath,
+    sourceBranch,
+    sourceHead: gitHead(repo, "HEAD"),
+    targetBranch,
+    targetRef,
+    targetHead: targetRef ? gitHead(repo, targetRef) : "",
+    targetWorktree,
+    targetWasClean: targetWorktree ? !isDirty(targetWorktree) : true,
+    backupRef,
+    backupHead,
+    backupExisted: Boolean(backupHead),
+    managementPath: managementWorktreeFor(worktrees, sourcePath)
+  };
+}
+
+function restoreDoneAttempt(plan) {
+  const actions = [];
+  const failures = [];
+  restoreSourceWorktree(plan, actions, failures);
+  restoreTargetBranch(plan, actions, failures);
+  restoreBackupRef(plan, actions, failures);
+
+  const sourceDirty = gitRootIfExists(plan.sourcePath) ? gitStatusShort(plan.sourcePath) : "";
+  if (sourceDirty) {
+    failures.push(`source worktree is still dirty:\n${sourceDirty}`);
+  }
+
+  return {
+    ok: failures.length === 0,
+    summary: [
+      actions.length > 0 ? `rollback actions: ${actions.join("; ")}` : "rollback actions: none needed",
+      ...failures.map((failure) => `rollback failure: ${failure}`)
+    ].join("\n")
+  };
+}
+
+function restoreSourceWorktree(plan, actions, failures) {
+  if (!plan.sourceHead) {
+    failures.push("missing source HEAD snapshot");
+    return;
+  }
+
+  if (gitRootIfExists(plan.sourcePath)) {
+    restoreExistingWorktree(plan.sourcePath, plan.sourceHead, "source worktree", actions, failures);
+    return;
+  }
+
+  if (!plan.sourceBranch) {
+    failures.push(`source worktree was removed and branch is unknown: ${plan.sourcePath}`);
+    return;
+  }
+
+  const cwd = restoreGitCwd(plan);
+  if (!cwd) {
+    failures.push(`source worktree was removed and no management worktree is available: ${plan.sourcePath}`);
+    return;
+  }
+
+  const added = runRestoreGit(cwd, ["worktree", "add", "-B", plan.sourceBranch, plan.sourcePath, plan.sourceHead], actions, failures, `recreate source worktree ${plan.sourcePath}`);
+  if (added) {
+    restoreExistingWorktree(plan.sourcePath, plan.sourceHead, "source worktree", actions, failures);
+  }
+}
+
+function restoreTargetBranch(plan, actions, failures) {
+  if (!plan.targetRef || !plan.targetHead) {
+    return;
+  }
+
+  if (plan.targetWorktree && normalizePath(plan.targetWorktree) !== normalizePath(plan.sourcePath)) {
+    if (!plan.targetWasClean) {
+      actions.push(`left pre-existing dirty target worktree untouched: ${plan.targetWorktree}`);
+      return;
+    }
+    if (gitRootIfExists(plan.targetWorktree)) {
+      restoreExistingWorktree(plan.targetWorktree, plan.targetHead, `target worktree ${plan.targetBranch}`, actions, failures);
+      return;
+    }
+  }
+
+  restoreRef(plan, plan.targetRef, plan.targetHead, `target branch ${plan.targetBranch}`, actions, failures);
+}
+
+function restoreBackupRef(plan, actions, failures) {
+  if (!plan.backupRef) {
+    return;
+  }
+  if (plan.backupExisted) {
+    restoreRef(plan, plan.backupRef, plan.backupHead, "worktrunk backup ref", actions, failures);
+    return;
+  }
+  if (gitHead(restoreGitCwd(plan), plan.backupRef)) {
+    deleteRef(plan, plan.backupRef, "worktrunk backup ref", actions, failures);
+  }
+}
+
+function restoreExistingWorktree(worktreePath, head, label, actions, failures) {
+  abortGitOperations(worktreePath);
+  runRestoreGit(worktreePath, ["reset", "--hard", head], actions, failures, `reset ${label}`);
+  runRestoreGit(worktreePath, ["clean", "-fd"], actions, failures, `clean ${label}`);
+}
+
+function restoreRef(plan, ref, head, label, actions, failures) {
+  const cwd = restoreGitCwd(plan);
+  if (!cwd) {
+    failures.push(`cannot restore ${label}; no management worktree is available`);
+    return;
+  }
+  runRestoreGit(cwd, ["update-ref", ref, head], actions, failures, `restore ${label}`);
+}
+
+function deleteRef(plan, ref, label, actions, failures) {
+  const cwd = restoreGitCwd(plan);
+  if (!cwd) {
+    failures.push(`cannot delete ${label}; no management worktree is available`);
+    return;
+  }
+  runRestoreGit(cwd, ["update-ref", "-d", ref], actions, failures, `delete ${label}`);
+}
+
+function restoreGitCwd(plan) {
+  return gitRootIfExists(plan.sourcePath) ||
+    gitRootIfExists(plan.managementPath) ||
+    gitRootIfExists(plan.targetWorktree);
+}
+
+function runRestoreGit(cwd, args, actions, failures, label) {
+  const result = tryCapture("git", args, { cwd });
+  if (result.ok) {
+    actions.push(label);
+    return true;
+  }
+  failures.push(`${label}: ${result.stderr || result.stdout || "git failed"}`);
+  return false;
+}
+
+function abortGitOperations(worktreePath) {
+  tryCapture("git", ["rebase", "--abort"], { cwd: worktreePath });
+  tryCapture("git", ["merge", "--abort"], { cwd: worktreePath });
+  tryCapture("git", ["cherry-pick", "--abort"], { cwd: worktreePath });
 }
 
 async function workspaceRemove(config, argv) {
@@ -642,6 +856,47 @@ function listRemoteBranches(repo) {
 function currentBranch(repo) {
   const result = tryCapture("git", ["branch", "--show-current"], { cwd: repo });
   return result.ok ? result.stdout : "";
+}
+
+function gitHead(repo, rev) {
+  if (!repo || !rev) {
+    return "";
+  }
+  const result = tryCapture("git", ["rev-parse", "--verify", rev], { cwd: repo });
+  return result.ok ? result.stdout : "";
+}
+
+function gitStatusShort(repo) {
+  const result = tryCapture("git", ["status", "--porcelain"], { cwd: repo });
+  return result.ok ? result.stdout : "";
+}
+
+function localBranchRef(repo, branch) {
+  if (!branch) {
+    return "";
+  }
+  const ref = `refs/heads/${branch}`;
+  const result = tryCapture("git", ["show-ref", "--verify", "--quiet", ref], { cwd: repo });
+  return result.ok ? ref : "";
+}
+
+function worktreePathForBranch(repo, branch) {
+  return worktreePathForBranchFromEntries(readGitWorktreeList(repo), branch);
+}
+
+function worktreePathForBranchFromEntries(worktrees, branch) {
+  if (!branch) {
+    return "";
+  }
+  return normalizePath(worktrees.find((worktree) => worktree.branch === branch)?.path || "");
+}
+
+function managementWorktreeFor(worktrees, sourcePath) {
+  const normalizedSource = normalizePath(sourcePath);
+  const candidate = worktrees.find((worktree) => {
+    return worktree.path && normalizePath(worktree.path) !== normalizedSource;
+  });
+  return normalizePath(candidate?.path || sourcePath);
 }
 
 function mergedIntoTargets(repo, branch, targets) {
@@ -1207,6 +1462,24 @@ function defaultMergeTarget(branches) {
     : branches.find((branch) => branch === "develop") || branches[0];
 }
 
+function defaultDoneTarget(repo) {
+  const current = currentBranch(repo);
+  const branches = listLocalBranches(repo).filter((branch) => branch !== current);
+  const remoteDefault = defaultRemoteBranch(repo);
+  if (remoteDefault && branches.includes(remoteDefault)) {
+    return remoteDefault;
+  }
+  return ["main", "master", "dev", "develop"].find((branch) => branches.includes(branch)) || "";
+}
+
+function defaultRemoteBranch(repo) {
+  const result = tryCapture("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], { cwd: repo });
+  if (!result.ok || !result.stdout) {
+    return "";
+  }
+  return result.stdout.startsWith("origin/") ? result.stdout.slice("origin/".length) : result.stdout;
+}
+
 function dirtyRemoveTargets(repo, argv) {
   const targets = removeTargets(argv);
   if (targets.length === 0) {
@@ -1411,6 +1684,7 @@ function parseDoneFlags(argv) {
   const flags = {
     closeCmux: true,
     agent: "",
+    retries: undefined,
     passthrough: []
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -1423,6 +1697,10 @@ function parseDoneFlags(argv) {
       flags.agent = argv[++index] || "";
     } else if (arg.startsWith("--agent=")) {
       flags.agent = arg.slice("--agent=".length);
+    } else if (arg === "--retries") {
+      flags.retries = Number(argv[++index]);
+    } else if (arg.startsWith("--retries=")) {
+      flags.retries = Number(arg.slice("--retries=".length));
     } else {
       flags.passthrough.push(arg);
     }
@@ -1474,7 +1752,7 @@ Commands:
   status [--json]                             Alias for list
   open [target] [--agent name] [--remotes]    Open picker or target with the AIW cmux layout
   switch [target]                             Alias for open
-  done [target] [--agent name] [--no-close-cmux]
+  done [target] [--agent name] [--retries n] [--no-close-cmux]
                                                Merge the current feature worktree, cleanup, then close cmux workspace
   remove [wt-remove-args...]                  Remove worktrees after dirty check
   gc|clean [--dry-run] [--apply|--yes] [--json] [--stale-seconds n]
@@ -1483,6 +1761,8 @@ Commands:
 
 Short aliases:
   aiw ws list                   aiw workspace list
+  aiw ws ls                     aiw workspace list
+  aiw als                       aiw workspace list
   aiw list                      aiw workspace list
   aiw ws open [target]          aiw workspace open [target]
   aiw open [target]             aiw workspace open [target]
@@ -1491,4 +1771,14 @@ Short aliases:
   aiw remove                    aiw workspace remove
   aiw gc                        aiw workspace gc
   aiw clean                     aiw workspace gc`);
+}
+
+function normalizeCommand(command) {
+  return String(command || "").toLowerCase();
+}
+
+function withExit(message, exitCode) {
+  const error = new Error(message);
+  error.exitCode = exitCode;
+  return error;
 }
