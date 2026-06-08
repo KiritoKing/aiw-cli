@@ -1,0 +1,114 @@
+name: Release alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch to publish from. Empty uses the selected workflow branch.
+        required: false
+        type: string
+      base_version:
+        description: Optional stable x.y.z base. Empty means auto patch from npm latest.
+        required: false
+        type: string
+
+concurrency:
+  group: release-alpha-${{ inputs.source_ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish alpha
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Select source ref
+        id: source
+        shell: bash
+        run: |
+          ref="$SOURCE_REF"
+          if [ -z "$ref" ]; then
+            ref="${GITHUB_REF_NAME}"
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+        env:
+          SOURCE_REF: ${{ inputs.source_ref || '' }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Check
+        run: npm run check
+
+      - name: Verify npm token
+        shell: bash
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN repository secret is required before publishing."
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Prepare version
+        id: prepare
+        shell: bash
+        run: |
+          args=(--channel alpha)
+          if [ -n "$BASE_VERSION" ]; then
+            args+=(--base-version "$BASE_VERSION")
+          fi
+          node scripts/prepare-release.mjs "${args[@]}"
+        env:
+          BASE_VERSION: ${{ inputs.base_version || '' }}
+
+      - name: Commit and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.prepare.outputs.version }}"
+          tag="${{ steps.prepare.outputs.tag }}"
+          ref="${{ steps.source.outputs.ref }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json
+          if [ -f package-lock.json ]; then
+            git add package-lock.json
+          fi
+
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): v${version}"
+          fi
+
+          head_sha="$(git rev-parse HEAD)"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_sha="$(git rev-list -n 1 "${tag}")"
+            if [ "$tag_sha" != "$head_sha" ]; then
+              echo "::error::Tag ${tag} already points to ${tag_sha}, not ${head_sha}."
+              exit 1
+            fi
+          else
+            git tag "${tag}"
+          fi
+
+          git push origin "HEAD:${ref}"
+          git push origin "${tag}"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public --tag "${{ steps.prepare.outputs.npm_tag }}" --registry=https://registry.npmjs.org/
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
