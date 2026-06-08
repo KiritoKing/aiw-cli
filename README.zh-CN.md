@@ -49,11 +49,10 @@ aiw doctor
 # 2. 创建或切换 Worktrunk worktree，并打开 AIW cmux layout。
 aiw cmux-new --agent codex
 
-# 3. 在四分屏 workspace 里工作。
+# 3. 在三 pane workspace 里工作。
 # Files: yazi
 # Agent: codex / claude / opencode / gemini / aider
-# Git: lazygit + AIW overlay
-# Diff: cmux-git-diff，或 git diff 通过 delta 渲染
+# Git: lazygit + AIW overlay，并用 delta 渲染 diff
 
 # 4. 审查并 stage 改动。
 aiw git
@@ -147,7 +146,7 @@ AIW 有意保持低依赖：
 - Process execution: 通过本地 helper 调用 Node child process。
 - Workspace orchestration: Worktrunk (`wt`) 和 cmux。
 - Git UI: lazygit；仅 `aiw git` 会加载 AIW 专用 overlay。
-- Diff UI: 优先 `cmux-git-diff`，否则 `git diff | delta`。
+- Diff UI: 默认通过 lazygit overlay 使用 delta；独立 `aiw diff` 命令仍优先 `cmux-git-diff`，否则 `git diff | delta`。
 - Picker 和搜索: fzf、rg、fd、bat。
 - 文件和编辑界面: yazi、nvim。
 - Agent: 在 [config/agents.toml](./config/agents.toml) 中声明命令适配器。
@@ -168,7 +167,7 @@ npm run check
 2. `aiw` 是编排入口。它负责解析 repo、branch/worktree、agent、依赖门禁和 layout，然后调用正确的底层命令。
 3. 成熟 CLI 工具负责真正执行：Worktrunk 管 worktree，yazi 管文件，nvim/LazyVim 管编辑，lazygit 管审查和 stage，delta 管 diff，rg/fd/fzf/bat/eza 管搜索和查看，zoxide 融入外层 shell 导航，agent CLI 负责模型交互。
 
-AIW 最初的目标很实际：在 Codex App 之外复刻它里面有价值的 workspace 动线，但不把 workflow 搬进一个封闭 App。目标不只是“屏幕上有四个 pane”，而是一条连续动作：打开 cmux，启动 AIW，创建或切换 worktree，进入标准 workspace，看文件，和 agent 交流，stage hunk，看实时 diff，commit，merge，清理。
+AIW 最初的目标很实际：在 Codex App 之外复刻它里面有价值的 workspace 动线，但不把 workflow 搬进一个封闭 App。目标不只是“屏幕上有几个 pane”，而是一条连续动作：打开 cmux，启动 AIW，创建或切换 worktree，进入标准 workspace，看文件，和 agent 交流，stage hunk，在 lazygit 里看 delta 渲染的 diff，commit，merge，清理。
 
 关键差异是控制权。成熟 App 的体验可以很完整，但它通常也固定了工作流形状。在终端工具栈里，你可以选择文件管理器、编辑器配置、Git UI、diff renderer、fuzzy finder、目录跳转工具、shell 行为、快捷键和 agent CLI。shell 渲染也是体验的一部分：当命令输出是开发过程的核心时，原生终端工具比嵌入式 shell 界面更可信、更可调，也更容易拼装。
 
@@ -189,7 +188,7 @@ aiw cmux-new
   -> repository and branch selection
   -> Worktrunk creates or switches the worktree
   -> aiw layout builds the cmux workspace
-  -> cmux opens Files / Agent / Git / Diff panes
+  -> cmux opens Files / Agent / Git panes
 ```
 
 清理流程也是同一套思想：
@@ -217,7 +216,7 @@ cmux entry
   -> dependency gate
   -> Worktrunk worktree create/switch
   -> aiw layout
-  -> cmux workspace with Files / Agent / Git / Diff
+  -> cmux workspace with Files / Agent / Git
 ```
 
 价值在于层与层之间的交接很流畅。cmux 继续作为开始工作和承载视图的地方；AIW 作为 workflow brain；底层 CLI 继续保持锋利和原生。
@@ -363,9 +362,9 @@ aiw cmux-new --local --agent codex
 | Files                | Agent                |
 | aiw files            | codex/claude/etc.    |
 +----------------------+----------------------+
-| Git                  | Diff                 |
-| aiw git              | aiw diff --watch     |
-+----------------------+----------------------+
+| Git                                         |
+| aiw git                                     |
++--------------------------------------------+
 ```
 
 `aiw layout --print-json` 可以只打印 cmux layout JSON，不打开 cmux。
@@ -610,8 +609,8 @@ aiw doctor --gate commit --agent codex
 
 Gate 行为：
 
-- `cmux-new` 需要 Git、Worktrunk、cmux、yazi、lazygit、nvim、选定 agent，以及 `cmux-git-diff` 或 delta 之一。
-- `layout` 需要 layout 相关工具和选定 agent，但不需要 Worktrunk。
+- `cmux-new` 需要 Git、Worktrunk、cmux、yazi、lazygit、nvim、选定 agent；配置 lazygit overlay 时还需要 delta。
+- `layout` 需要 layout 相关工具、选定 agent，以及同一组 lazygit overlay 依赖，但不需要 Worktrunk。
 - `init` 在写配置前检查默认工作流初始化所需工具。
 - `workspace` 需要 Git 和 Worktrunk。
 - `git` 在配置 lazygit overlay 时需要 lazygit 和 delta。

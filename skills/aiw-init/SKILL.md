@@ -69,7 +69,7 @@ For first-time package bootstrap:
 npx @chlrc/aiw init --launcher "npx @chlrc/aiw" --dry-run --yes
 ```
 
-3. Explain blockers using the preflight output. Blocking setup dependencies include Node/npx, Git, Worktrunk (`wt`), cmux, yazi, lazygit, nvim, the default layout/commit agent, and either `cmux-git-diff` or `delta` for diff display. Optional tools such as `fd`, `eza`, and non-default agents should be reported without blocking unrelated setup.
+3. Explain blockers using the preflight output. Blocking setup dependencies include Node/npx, Git, Worktrunk (`wt`), cmux, yazi, lazygit, nvim, the default layout/commit agent, and `delta` when the lazygit overlay is configured. Optional tools such as `fd`, `eza`, and non-default agents should be reported without blocking unrelated setup.
 
 4. Apply only after the user intends it:
 

@@ -57,7 +57,7 @@ Use `--json` when automating decisions. The workspace table combines Worktrunk, 
 
 ## Open or Create Workspaces
 
-Create or switch to a worktree and open the standard four-pane cmux layout:
+Create or switch to a worktree and open the standard three-pane cmux layout:
 
 ```bash
 aiw cmux-new --agent codex

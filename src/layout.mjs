@@ -18,14 +18,7 @@ export function buildLayout(config, agentName) {
           terminalPane(agentTitle(agent.name), agentCommand)
         ]
       },
-      {
-        direction: "horizontal",
-        split: 0.5,
-        children: [
-          terminalPane("Git", `${aiw} git`),
-          terminalPane("Diff", `${aiw} diff --watch`)
-        ]
-      }
+      terminalPane("Git", `${aiw} git`)
     ]
   };
 }
