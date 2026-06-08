@@ -114,6 +114,31 @@ npx --yes skills add . --list -y
 
 `aiw init` does not install these skills yet; it only initializes AIW config and cmux integration.
 
+## Release and Branch Model
+
+AIW publishes the npm package from GitHub Actions. The workflows expect a repository secret named `NPM_TOKEN` with publish access to `@chlrc/aiw` on the public npm registry. Release jobs stop before writing version commits or tags when the secret is missing.
+
+- `master` is the stable release line. Every push to `master` runs `Release latest`, checks the CLI, prepares the next stable version, creates a `chore(release): vX.Y.Z` commit, creates Git tag `vX.Y.Z`, and publishes with npm dist-tag `latest`.
+- Stable releases default to patch bumps. If `package.json` is not ahead of the latest stable npm version, CI bumps the patch number. To release a new major or minor version, manually bump `package.json` to the desired `X.Y.0` before merging to `master`; CI will publish that higher base instead of inventing a major/minor bump.
+- `develop` is the beta release line. Every push to `develop` runs `Release beta`, prepares the next `X.Y.Z-beta.N`, creates the matching release commit and Git tag, and publishes with npm dist-tag `beta`. The beta number is derived from already-published beta versions for the selected base.
+- Alpha releases are manual only. Run the `Release alpha` workflow from GitHub Actions, choose the source branch or pass `source_ref`, optionally pass `base_version`, and it publishes the next `X.Y.Z-alpha.N` with npm dist-tag `alpha`.
+
+The version helper can be checked locally without writing files:
+
+```bash
+node scripts/prepare-release.mjs --channel stable --dry-run
+node scripts/prepare-release.mjs --channel beta --dry-run
+node scripts/prepare-release.mjs --channel alpha --base-version 0.2.0 --dry-run
+```
+
+Create the long-lived development branch after this workflow change lands:
+
+```bash
+git fetch origin
+git checkout -b develop origin/master
+git push -u origin develop
+```
+
 ## Init
 
 Use `npx @chlrc/aiw init` on macOS or Linux to bootstrap a machine for AIW.

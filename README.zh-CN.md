@@ -114,6 +114,31 @@ npx --yes skills add . --list -y
 
 `aiw init` 暂不安装这些 skills；它只初始化 AIW config 和 cmux 集成。
 
+## 发布与分支模型
+
+AIW 通过 GitHub Actions 发布 npm 包。仓库需要配置名为 `NPM_TOKEN` 的 repository secret，并确保它有 `@chlrc/aiw` 在公网 npm registry 的发布权限。缺少 secret 时，release job 会在写版本提交或 tag 之前失败。
+
+- `master` 是稳定版本线。每次 push 到 `master` 都会触发 `Release latest`，先检查 CLI，再准备下一个稳定版本，创建 `chore(release): vX.Y.Z` 提交，创建 Git tag `vX.Y.Z`，并用 npm dist-tag `latest` 发布。
+- 稳定版本默认只 bump patch。如果 `package.json` 不高于 npm 上的最新稳定版本，CI 会递增最后一个版本号。需要发布新的 major 或 minor 时，先手动把 `package.json` 改到目标 `X.Y.0`，再合入 `master`；CI 会发布这个更高 base，不会自动发明 major/minor。
+- `develop` 是 beta 版本线。每次 push 到 `develop` 都会触发 `Release beta`，准备下一个 `X.Y.Z-beta.N`，创建对应 release 提交和 Git tag，并用 npm dist-tag `beta` 发布。`N` 会根据同一 base 下已经发布过的 beta 版本自动递增。
+- alpha 版本只手动发布。到 GitHub Actions 里运行 `Release alpha`，选择源分支或填写 `source_ref`，可选填写 `base_version`，workflow 会发布下一个 `X.Y.Z-alpha.N`，并使用 npm dist-tag `alpha`。
+
+本地可以用 dry-run 验证版本计算，不写文件：
+
+```bash
+node scripts/prepare-release.mjs --channel stable --dry-run
+node scripts/prepare-release.mjs --channel beta --dry-run
+node scripts/prepare-release.mjs --channel alpha --base-version 0.2.0 --dry-run
+```
+
+这次 workflow 合入后，创建长期 `develop` 分支：
+
+```bash
+git fetch origin
+git checkout -b develop origin/master
+git push -u origin develop
+```
+
 ## 初始化
 
 在 macOS 或 Linux 上，可以用 `npx @chlrc/aiw init` 为一台机器初始化 AIW。
