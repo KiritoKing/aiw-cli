@@ -49,11 +49,10 @@ aiw doctor
 # 2. Create or switch to a Worktrunk worktree and open the AIW cmux layout.
 aiw cmux-new --agent codex
 
-# 3. Work in the four-pane workspace.
+# 3. Work in the three-pane workspace.
 # Files: yazi
 # Agent: codex / claude / opencode / gemini / aider
-# Git: lazygit with the AIW overlay
-# Diff: cmux-git-diff or git diff piped through delta
+# Git: lazygit with the AIW overlay and delta-rendered diffs
 
 # 4. Review and stage changes.
 aiw git
@@ -147,7 +146,7 @@ AIW is deliberately dependency-light:
 - Process execution: Node child processes through local helpers.
 - Workspace orchestration: Worktrunk (`wt`) and cmux.
 - Git UI: lazygit, with an AIW-specific overlay loaded only by `aiw git`.
-- Diff UI: `cmux-git-diff` when installed, otherwise `git diff | delta`.
+- Diff UI: delta through the lazygit overlay by default; standalone `aiw diff` uses `cmux-git-diff` when installed, otherwise `git diff | delta`.
 - Pickers and search: fzf, rg, fd, bat.
 - File and edit surfaces: yazi and nvim.
 - Agents: command adapters defined in [config/agents.toml](./config/agents.toml).
@@ -168,7 +167,7 @@ Think of AIW in three layers:
 2. `aiw` is the orchestration entrypoint. It resolves the repo, branch/worktree, agent, dependency gates, and layout, then calls the right lower-level command.
 3. Mature CLI tools do the real work: Worktrunk for worktrees, yazi for files, nvim/LazyVim for editing, lazygit for review and staging, delta for diffs, rg/fd/fzf/bat/eza for search and inspection, zoxide in the surrounding shell workflow, and agent CLIs for model interaction.
 
-AIW started from a practical goal: recreate the useful Codex App-style workspace motion without moving the workflow into a closed app. The target experience is not just "four panes on screen." It is a continuous path: open cmux, start AIW, create or switch a worktree, land in the standard workspace, inspect files, talk to an agent, stage hunks, watch the diff, commit, merge, and clean up.
+AIW started from a practical goal: recreate the useful Codex App-style workspace motion without moving the workflow into a closed app. The target experience is not just "panes on screen." It is a continuous path: open cmux, start AIW, create or switch a worktree, land in the standard workspace, inspect files, talk to an agent, stage hunks, review the delta-rendered diff in lazygit, commit, merge, and clean up.
 
 The important difference is control. A polished app can be pleasant, but it tends to fix the shape of the workflow. In a terminal stack, you can choose the file manager, editor setup, Git UI, diff renderer, fuzzy finder, navigation tools, shell behavior, keybindings, and agent CLI. Shell rendering also matters: when command output is central to development, native terminal tools are easier to trust, tune, and compose than an embedded shell surface.
 
@@ -189,7 +188,7 @@ aiw cmux-new
   -> repository and branch selection
   -> Worktrunk creates or switches the worktree
   -> aiw layout builds the cmux workspace
-  -> cmux opens Files / Agent / Git / Diff panes
+  -> cmux opens Files / Agent / Git panes
 ```
 
 The same idea applies to cleanup:
@@ -217,7 +216,7 @@ cmux entry
   -> dependency gate
   -> Worktrunk worktree create/switch
   -> aiw layout
-  -> cmux workspace with Files / Agent / Git / Diff
+  -> cmux workspace with Files / Agent / Git
 ```
 
 The value is the fluid handoff between layers. cmux stays the place you start and look. AIW stays the workflow brain. The lower-level CLIs stay sharp and native.
@@ -362,9 +361,9 @@ The standard cmux layout is:
 | Files                | Agent                |
 | aiw files            | codex/claude/etc.    |
 +----------------------+----------------------+
-| Git                  | Diff                 |
-| aiw git              | aiw diff --watch     |
-+----------------------+----------------------+
+| Git                                         |
+| aiw git                                     |
++--------------------------------------------+
 ```
 
 `aiw layout --print-json` prints the cmux layout JSON without opening cmux.
@@ -609,8 +608,8 @@ aiw doctor --gate commit --agent codex
 
 Gate behavior:
 
-- `cmux-new` requires Git, Worktrunk, cmux, yazi, lazygit, nvim, the selected agent, and either `cmux-git-diff` or delta.
-- `layout` requires the layout tools and selected agent, but not Worktrunk.
+- `cmux-new` requires Git, Worktrunk, cmux, yazi, lazygit, nvim, the selected agent, and delta when the lazygit overlay is configured.
+- `layout` requires the layout tools, selected agent, and the same lazygit overlay dependencies, but not Worktrunk.
 - `init` checks the tools needed to bootstrap the default workflow before writing config.
 - `workspace` requires Git and Worktrunk.
 - `git` requires lazygit and delta when the lazygit overlay is configured.

@@ -126,29 +126,24 @@ export function printDoctor(config, options = {}) {
 
 function requirementsFor(profile, config, agent) {
   const agentCmd = agent?.cmd;
+  const gitDeps = [config.defaults.git || "lazygit", ...lazygitOverlayDeps(config)];
   switch (profile) {
     case "base":
       return req(["git"]);
     case "init":
-      return req(["sh", "git", "cmux", "wt", "yazi", "nvim", "lazygit", "rg", "fzf", "bat", agentCmd].filter(Boolean), [
-        ["cmux-git-diff", "delta"]
-      ]);
+      return req(["sh", "git", "cmux", "wt", "yazi", "nvim", ...gitDeps, "rg", "fzf", "bat", agentCmd].filter(Boolean));
     case "layout":
-      return req(["git", "cmux", "yazi", "lazygit", "nvim", agentCmd].filter(Boolean), [
-        ["cmux-git-diff", "delta"]
-      ]);
+      return req(["git", "cmux", "yazi", "nvim", ...gitDeps, agentCmd].filter(Boolean));
     case "cmux-new":
     case "new":
-      return req(["git", "wt", "cmux", "yazi", "lazygit", "nvim", agentCmd].filter(Boolean), [
-        ["cmux-git-diff", "delta"]
-      ]);
+      return req(["git", "wt", "cmux", "yazi", "nvim", ...gitDeps, agentCmd].filter(Boolean));
     case "worktrunk":
     case "workspace":
       return req(["git", "wt"]);
     case "files":
       return req([config.defaults.files || "yazi"]);
     case "git":
-      return req([config.defaults.git || "lazygit", ...(config.git.lazygit_config ? ["delta"] : [])]);
+      return req(gitDeps);
     case "edit":
       return req([config.defaults.editor || "nvim"]);
     case "grep":
@@ -169,4 +164,8 @@ function requirementsFor(profile, config, agent) {
 
 function req(commands, anyOf = []) {
   return { commands, anyOf };
+}
+
+function lazygitOverlayDeps(config) {
+  return config.git.lazygit_config ? ["delta"] : [];
 }

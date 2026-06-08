@@ -1,75 +1,46 @@
 # AIW Handoff
 
-更新时间：2026-06-03
+更新时间：2026-06-08
 
 ## 当前活动
 
-合并 `aiw done` 的 Worktrunk commit-message bridge、失败 retry/rollback，以及日常 alias 增强。
+优化默认 cmux layout：去掉底部独立 diff pane，保留底部单个 lazygit pane，并继续通过 lazygit overlay 使用 delta 渲染 diff。
 
 ## 本次已处理
 
-- `aiw commit-message` 命令保留：从 stdin 或 `--prompt` 读取 prompt，调用 AIW 当前 commit agent，只输出清理后的 commit message，不执行 `git commit`。
-- `aiw workspace done` / `aiw done` 在需要 Worktrunk squash commit message 且 Worktrunk 未配置生成器时，会为本次 `wt merge` 注入：
+- `src/layout.mjs` 的默认 layout 已从四 pane 调整为三 pane：
 
-```bash
-WORKTRUNK_COMMIT__GENERATION__COMMAND="<aiw> commit-message --agent <agent>"
+```text
++----------------------+----------------------+
+| Files                | Agent                |
+| aiw files            | codex/claude/etc.    |
++----------------------+----------------------+
+| Git                                         |
+| aiw git                                     |
++--------------------------------------------+
 ```
 
-- `aiw done --agent <name>` 用于选择注入给 Worktrunk 的 AIW commit agent；该参数不会透传给 `wt merge`。
-- 如果用户已配置 `WORKTRUNK_COMMIT__GENERATION__COMMAND` 或 Worktrunk config 里已有 `[commit.generation] command`，AIW 不覆盖。
-- `--no-squash` / `--no-commit` 不需要 squash message，AIW 不会强制检查 commit agent。
-- `aiw workspace done` / `aiw done` 新增外层 retry：
-  - 默认读取 `commit.retries`，当前默认 3。
-  - 支持 `--retries <n>` / `--retries=<n>` 覆盖。
-  - 每次 `wt merge` 失败后恢复 source worktree、target branch 和 Worktrunk `refs/wt-backup/<branch>`。
-  - 最终失败时仍保持 source worktree clean，避免留下 Worktrunk squash/rebase 的中间脏状态。
-- `done` 在进入 `wt merge` 前会检查目标分支对应 worktree；如果目标 worktree dirty，会直接拒绝并提示先 clean/stash。
-- 补齐 alias：
-  - `aiw ls`、`aiw als`、`aiw ws ls`、`aiw ws als` -> workspace list。
-  - `aiw new` 和 `aiw cmux new` -> `aiw cmux-new`。
-  - `aiw new <agent>` 的位置参数解析已与 `aiw cmux-new <agent>` 对齐。
-- 已合并 rebase 冲突，冲突文件包括：
-  - `src/workspace.mjs`
-  - `src/cli.mjs`
-  - `README.md`
-  - `README.zh-CN.md`
-  - `skills/aiw-reference/SKILL.md`
-  - `HANDOFF.md`
-- 上一轮 npm publish 预备改动仍在：`package.json` 已是 `0.1.1`，README 的 skills 安装示例已改为 `KiritoKing/aiw-cli`。
+- `aiw diff` 命令仍保留；它不再是默认 workspace 的独立 pane。
+- `src/deps.mjs` 的 `layout` / `cmux-new` / `init` gate 已不再把 `cmux-git-diff` 当作默认 workspace 必需项。
+- 配置了 `git.lazygit_config` 时，`layout` / `cmux-new` / `init` / `git` gate 都会要求 `delta`，保证底部 lazygit pane 不是原生难读 diff。
+- `README.md`、`README.zh-CN.md`、`skills/aiw-reference/SKILL.md`、`skills/aiw-init/SKILL.md` 已同步新默认模板和 gate 说明。
+- 新增 `docs/2026-06-08-layout-template.md` 记录本次默认模板决策；更早的日期文档保持历史快照，不直接改写。
 
 ## 验证结果
 
-- `npm run check` 通过。
+- `node bin/aiw layout --agent codex --print-json` 通过，输出为上方 Files/Agent、底部 Git 的三 pane layout。
+- `node bin/aiw doctor --gate layout --agent codex --json` 通过，gate satisfied 包含 `lazygit` 和 `delta`。
+- `node bin/aiw doctor --gate cmux-new --agent codex --json` 通过，gate satisfied 包含 `lazygit` 和 `delta`，不依赖 `cmux-git-diff`。
+- `node bin/aiw doctor --gate init --agent codex --json` 通过，gate satisfied 包含 `lazygit` 和 `delta`。
+- `node bin/aiw doctor --gate git --json` 通过，gate satisfied 为 `lazygit`、`delta`。
+- `ruby -ryaml -e 'YAML.load_file("config/lazygit-delta.yml")'` 通过。
+- `npm run check` 通过；npm 仍会输出本机 npmrc 的 `always-auth` / `email` / `home` unknown config warning，但不影响检查。
 - `git diff --check` 通过。
-- 临时 AIW config + mock agent 验证 `aiw commit-message` 的 stdin -> stdout 行为通过，输出 `fix: generated squash message`。
-- 临时 Git worktree 验证 `aiw done main --retries 2 --no-close-cmux`：
-  - commit-msg hook 故意失败时，实际执行 2 次 merge attempt。
-  - 最终失败后 source HEAD、target HEAD 均恢复到执行前。
-  - source/target `git status --porcelain` 均为空。
-  - Worktrunk backup ref 未残留。
-- 临时 Git worktree 验证目标 worktree dirty：
-  - 命令在进入 merge 前以 exit 5 拒绝。
-  - 未出现 merge attempt。
-- 临时 Git worktree 验证成功路径：
-  - 正常 1 次 attempt 后 merge 到 target。
-  - target worktree 保持 clean。
-- alias smoke test 通过：
-  - `aiw ls --json`
-  - `aiw ALS --json`
-  - `aiw ws als --json`
-  - `aiw new --repo <repo> --branch <branch> --dry-run`
-  - `aiw cmux new --repo <repo> --branch <branch> --dry-run`
 
 ## 当前阻塞
 
-- 上一轮 npm publish 仍阻塞在公网 npm 登录/权限：`npm whoami --registry=https://registry.npmjs.org/` 返回 401；`@chlrc/aiw@0.1.1` 尚未发布。
-- 完成公网 npm 登录并确认 `@chlrc` scope 权限后，可以发布当前 `0.1.1`：
-
-```bash
-npm publish --access public --registry=https://registry.npmjs.org/
-```
+- 无。
 
 ## 后续建议
 
-- 如果后续要进一步降低 `done` 的黑盒程度，可以把 retry/rollback 的临时仓库场景固化成脚本化测试。
-- Worktrunk 成功 merge 后 worktree removal 是后台动作；如果未来要在 AIW 中做强校验，需要额外等待/轮询 Worktrunk cleanup 结果。
+- 如需进一步调高度，可以调整 `src/layout.mjs` 顶层 `split`；本次保留原来的 `0.56`，只改变底部 pane 结构。
