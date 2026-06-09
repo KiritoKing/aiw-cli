@@ -74,7 +74,52 @@ cd /Users/bytedance/Code/aiw
 node bin/aiw init --yes --cmux-scope home
 ```
 
+## Push / Publish 状态
+
+- Scratch 改动已在本地提交：
+
+```text
+017ad03 feat(cmux): add scratch sessions
+```
+
+- 当前分支状态：
+
+```text
+master...origin/master [ahead 1]
+```
+
+- `npm run check` 通过。
+- `npm pack --dry-run --cache /private/tmp/aiw-npm-cache --registry=https://registry.npmjs.org/` 通过，包为 `@chlrc/aiw@0.1.1`，package size `55.1 kB`，total files `25`。
+- `git push origin master` 未成功，失败点：
+
+```text
+Could not resolve host: github.com
+```
+
+- `npm view @chlrc/aiw version --registry=https://registry.npmjs.org/` 未成功，失败点：
+
+```text
+getaddrinfo ENOTFOUND registry.npmjs.org
+```
+
+- `npm whoami --registry=https://registry.npmjs.org/` 未成功，同样是 `getaddrinfo ENOTFOUND registry.npmjs.org`。
+- `npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache` 已执行，完成本地 tarball 生成后发布失败，失败点：
+
+```text
+getaddrinfo ENOTFOUND registry.npmjs.org
+```
+
+- 当前 Codex 执行环境不能自行提权或解除网络/DNS 限制；push 和 publish 需要在有网络的本机终端执行：
+
+```bash
+cd /Users/bytedance/Code/aiw
+git push origin master
+npm whoami --registry=https://registry.npmjs.org/
+npm view @chlrc/aiw version --registry=https://registry.npmjs.org/
+npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache
+```
+
 ## 后续建议
 
 - 在本机终端完成 cmux 初始化后，运行 `cmux reload-config` 或确认 `aiw init` 自动 reload 成功。
-- 用户确认体验后，提交并发布新版本。
+- 在有外网 DNS 的终端完成 `git push origin master` 和 `npm publish`。
