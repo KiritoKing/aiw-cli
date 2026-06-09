@@ -4,160 +4,73 @@
 
 ## 当前活动
 
-新增非项目 scratch session 入口已完成本地实现与验证；用户要求按新配置重新初始化 cmux，但当前 Codex 文件沙箱阻止写入 `~/Documents/aiw` / `~/.config/cmux`，真实初始化未完成。
+Scratch session 管理能力已实现并验证；真实 cmux 配置已重刷为本地 checkout launcher。
 
 ## 本次已处理
 
-- 新增 `aiw cmux scratch`，并保留短别名：
-  - `aiw scratch`
-  - `aiw session`
-- Scratch session 默认创建在 `paths.sessions` 下，默认值为 `~/Documents/aiw`。
-- 默认目录结构为：
+- 新增 scratch session 管理入口：
+  - `aiw scratch list`
+  - `aiw scratch resume`
+  - `aiw cmux scratch resume`
+- 新建 scratch session 时写入 `.aiw-session.json`，记录：
+  - 创建时间
+  - agent
+  - session id
+  - 第一条消息
+  - session path
+- `aiw scratch resume` 扫描 `paths.sessions`，用 fzf TUI 展示并搜索：
 
 ```text
-~/Documents/aiw/YYYY-MM-DD/HHMMSS-<uuid8>
+时间    session id    第一条消息    路径
 ```
 
-- 支持：
-  - `--id <id>` 或位置参数指定 session id。
-  - `--root <path>` 临时覆盖 session root。
-  - `--dry-run` 只打印目录和 cmux 命令，不创建目录。
-- Scratch cmux layout 是两 panel：
+- 支持按日期、session id、第一条消息内容、路径片段模糊匹配。
+- 支持非交互直开：
 
-```text
-+----------------------+----------------------+
-| Files                | Agent                |
-| aiw files            | codex/claude/etc.    |
-+----------------------+----------------------+
+```bash
+aiw scratch resume --id <session-id>
 ```
 
-- Scratch 不要求当前目录是 Git repo，不调用 Worktrunk，不打开 Git pane，不参与 `workspace done/gc`。
-- 新增 `scratch` / `session` dependency gate，只要求 `cmux`、`yazi`、`nvim`、目标 agent。
-- `aiw init` 新增 `--sessions-root`，并在 cmux config 中加入：
+- 新增 `scratch-resume` dependency gate，要求 `cmux`、`yazi`、`nvim`、`fzf` 和目标 agent。
+- `aiw init` 现在会注册两个 scratch 相关 cmux action：
 
 ```text
 aiw-scratch-session -> aiw cmux scratch
+aiw-scratch-resume  -> aiw cmux scratch resume
 ```
 
-- `README.md`、`README.zh-CN.md`、`skills/aiw-reference/SKILL.md`、`skills/aiw-init/SKILL.md` 已同步。
-- 新增历史记录：`docs/2026-06-09-scratch-sessions.md`。
+- 修复 `aiw init` 默认 launcher：从错误的 `npx aiw` 改为 `npx --yes @chlrc/aiw`，避免命中 npm 上另一个 `aiw@1.0.0` 包。
+- 本机真实 `~/.config/cmux/cmux.json` 已用本地 checkout launcher 重刷：
+
+```text
+node /Users/bytedance/Code/aiw/bin/aiw cmux-new
+node /Users/bytedance/Code/aiw/bin/aiw cmux-new --pick-repo
+node /Users/bytedance/Code/aiw/bin/aiw cmux-new --local
+node /Users/bytedance/Code/aiw/bin/aiw cmux scratch
+node /Users/bytedance/Code/aiw/bin/aiw cmux scratch resume
+```
+
+- `cmux reload-config` 已成功。
+- `README.md`、`README.zh-CN.md`、`skills/aiw-reference/SKILL.md`、`skills/aiw-init/SKILL.md`、`docs/2026-06-09-scratch-sessions.md` 已同步。
 
 ## 验证结果
 
+- `node bin/aiw scratch list --root /private/tmp/aiw-session-fixture --json` 通过。
+- `node bin/aiw scratch list --root /private/tmp/aiw-session-fixture` 通过。
+- `node bin/aiw scratch resume --root /private/tmp/aiw-session-fixture --id 142939-912bdf48 --agent codex --dry-run` 通过。
+- `node bin/aiw doctor --gate scratch-resume --agent codex --json` 通过。
+- `node bin/aiw init --dry-run --yes --cmux-scope home` 通过。
+- `node bin/aiw init --yes --cmux-scope home --launcher "node /Users/bytedance/Code/aiw/bin/aiw"` 通过并 reload cmux。
 - `npm run check` 通过；npm 仍输出本机 npmrc 的 `always-auth` / `email` / `home` unknown config warning，不影响检查。
-- `node bin/aiw doctor --gate scratch --agent codex --json` 通过。
-- `node bin/aiw doctor --gate session --agent codex --json` 通过。
-- `node bin/aiw cmux scratch --agent codex --root /private/tmp/aiw-sessions --id cmux-smoke --dry-run` 通过，输出为两 panel layout。
-- 在非 Git 目录 `/private/tmp` 下运行 `node /Users/bytedance/Code/aiw/bin/aiw cmux scratch --agent codex --root /private/tmp/aiw-sessions --id nongit-cmux --dry-run` 通过。
-- 临时运行 `aiw init --cmux-scope code ... --sessions-root ... --no-reload` 通过，并确认写出的 cmux action 命令为 `node /Users/bytedance/Code/aiw/bin/aiw cmux scratch`。
 - `git diff --check` 通过。
-- 临时 init 目录已清理。
+- `/private/tmp/aiw-session-fixture` 已清理。
 
-## 最新执行状态
+## 当前 Git 状态
 
-- `node bin/aiw init --dry-run --yes --cmux-scope home` 通过，计划为：
-  - 保留现有 `~/.config/aiw` 配置文件。
-  - 创建 `~/Documents/aiw`。
-  - merge `~/.config/cmux/cmux.json`，并备份为 `~/.config/cmux/cmux.json.20260609T062835.bak`。
-  - 写入 `aiw-scratch-session -> aiw cmux scratch`。
-- `node bin/aiw init --yes --cmux-scope home` 未成功，失败点：
-
-```text
-EPERM: operation not permitted, mkdir '/Users/bytedance/Documents/aiw'
-```
-
-- 原因是当前 Codex 会话文件沙箱只允许写 `/Users/bytedance/Code/aiw` 和临时目录，不能写用户 home 下的 Documents / cmux config。
-- 需要在用户本机终端直接运行：
-
-```bash
-cd /Users/bytedance/Code/aiw
-node bin/aiw init --yes --cmux-scope home
-```
-
-## Push / Publish 状态
-
-- Scratch 改动已在本地提交：
-
-```text
-017ad03 feat(cmux): add scratch sessions
-```
-
-- 当前分支状态：
-
-```text
-master...origin/master [ahead 1]
-```
-
-- `npm run check` 通过。
-- `npm pack --dry-run --cache /private/tmp/aiw-npm-cache --registry=https://registry.npmjs.org/` 通过，包为 `@chlrc/aiw@0.1.1`，package size `55.1 kB`，total files `25`。
-- `git push origin master` 未成功，失败点：
-
-```text
-Could not resolve host: github.com
-```
-
-- `npm view @chlrc/aiw version --registry=https://registry.npmjs.org/` 未成功，失败点：
-
-```text
-getaddrinfo ENOTFOUND registry.npmjs.org
-```
-
-- `npm whoami --registry=https://registry.npmjs.org/` 未成功，同样是 `getaddrinfo ENOTFOUND registry.npmjs.org`。
-- `npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache` 已执行，完成本地 tarball 生成后发布失败，失败点：
-
-```text
-getaddrinfo ENOTFOUND registry.npmjs.org
-```
-
-- 当前 Codex 执行环境不能自行提权或解除网络/DNS 限制；push 和 publish 需要在有网络的本机终端执行：
-
-```bash
-cd /Users/bytedance/Code/aiw
-git push origin master
-npm whoami --registry=https://registry.npmjs.org/
-npm view @chlrc/aiw version --registry=https://registry.npmjs.org/
-npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache
-```
+- 本地 `master` 领先 `origin/master` 3 个历史提交。
+- 本次 session resume 改动尚未提交。
 
 ## 后续建议
 
-- 在本机终端完成 cmux 初始化后，运行 `cmux reload-config` 或确认 `aiw init` 自动 reload 成功。
-- 在有外网 DNS 的终端完成 `git push origin master` 和 `npm publish`。
-
-## 已发现问题：cmux launcher 包名错误
-
-- 用户在 cmux 里触发 `npx aiw cmux-new --pick-repo` 时，npx 命中了 npm 上另一个未 scoped 包：
-
-```text
-Need to install the following packages:
-aiw@1.0.0
-```
-
-- 根因：`src/init.mjs` 的默认 `launcher` 是 `npx aiw`，而本项目的正确包名是 `@chlrc/aiw`。
-- 已在代码中修复默认值为：
-
-```text
-npx --yes @chlrc/aiw
-```
-
-- 当前实际 `~/.config/cmux/cmux.json` 仍含旧命令：
-
-```text
-npx aiw cmux-new
-npx aiw cmux-new --pick-repo
-npx aiw cmux-new --local
-npx aiw cmux scratch
-```
-
-- 当前 Codex 沙箱不能写 `~/.config/cmux/cmux.json`，执行 `node bin/aiw init --yes --cmux-scope home` 失败于：
-
-```text
-EPERM: operation not permitted, copyfile '/Users/bytedance/.config/cmux/cmux.json' -> '/Users/bytedance/.config/cmux/cmux.json.20260609T084710.bak'
-```
-
-- 需要在用户本机终端运行本地 checkout 的修复版 init：
-
-```bash
-cd /Users/bytedance/Code/aiw
-node bin/aiw init --yes --cmux-scope home
-```
+- 提交本次改动。
+- 网络可用后 push 并发布新版本。

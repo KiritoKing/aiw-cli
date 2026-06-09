@@ -382,6 +382,11 @@ aiw cmux scratch
 aiw scratch --agent codex
 aiw scratch "api-notes" --agent codex
 aiw cmux scratch --agent codex
+aiw scratch --message "Compare release blockers"
+aiw scratch list
+aiw scratch resume
+aiw scratch resume --query "2026-06-09 release"
+aiw scratch resume --id 142939-912bdf48
 aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 ```
 
@@ -390,7 +395,12 @@ Behavior:
 - Sessions are created under `paths.sessions`, defaulting to `~/Documents/aiw`.
 - The directory layout is `YYYY-MM-DD/<session-id>`.
 - Without an explicit ID, AIW generates `HHMMSS-<uuid8>`.
+- New sessions write `.aiw-session.json` with creation time, agent, session ID, and the first message.
 - The scratch layout opens Files and Agent panes only; it does not open Git or call Worktrunk.
+- `aiw scratch list` prints previous scratch sessions.
+- `aiw scratch resume` opens an fzf picker over previous sessions. The searchable row includes time, session ID, first message, and path, so fuzzy matching works across content and dates.
+- `aiw scratch resume --id <id>` reopens a previous session without the TUI.
+- `aiw init` registers both `aiw-scratch-session` and `aiw-scratch-resume` cmux actions.
 - `--root <path>` temporarily overrides `paths.sessions`.
 - `--dry-run` prints the directory and cmux command without creating anything.
 
@@ -629,6 +639,7 @@ aiw doctor --gate git
 aiw doctor --gate workspace
 aiw doctor --gate layout --agent codex
 aiw doctor --gate scratch --agent codex
+aiw doctor --gate scratch-resume --agent codex
 aiw doctor --gate cmux-new --agent codex
 aiw doctor --gate init --agent codex
 aiw doctor --gate commit --agent codex
@@ -639,6 +650,7 @@ Gate behavior:
 - `cmux-new` requires Git, Worktrunk, cmux, yazi, lazygit, nvim, the selected agent, and delta when the lazygit overlay is configured.
 - `layout` requires the layout tools, selected agent, and the same lazygit overlay dependencies, but not Worktrunk.
 - `scratch` requires cmux, yazi, nvim, and the selected agent, but not Git, Worktrunk, lazygit, or delta.
+- `scratch-resume` adds fzf for the resume picker.
 - `init` checks the tools needed to bootstrap the default workflow before writing config.
 - `workspace` requires Git and Worktrunk.
 - `git` requires lazygit and delta when the lazygit overlay is configured.
