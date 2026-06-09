@@ -126,11 +126,13 @@ When the blocking gate passes, init creates missing directories and config files
 npx @chlrc/aiw init
 npx @chlrc/aiw init --cmux-scope home
 npx @chlrc/aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
+npx @chlrc/aiw init --sessions-root ~/Documents/aiw
 npx @chlrc/aiw init --cmux-scope none --dry-run
 ```
 
 - AIW config defaults to `~/.config/aiw`, or `$AIW_CONFIG_DIR` when set.
 - `--code-root` and `--worktrees-root` control the paths written into `aiw.toml`; defaults are `~/Code` and `~/worktrees`.
+- `--sessions-root` controls the scratch session root written into `aiw.toml`; the default is `~/Documents/aiw`.
 - cmux registration defaults to `~/.config/cmux/cmux.json`; use `--cmux-scope code` to write `<code-root>/.cmux/cmux.json`, or `--cmux-scope none` to skip cmux.
 - In an interactive terminal, init asks where to register cmux. `--yes` uses the default without prompting.
 - Existing AIW config files are kept by default. Use `--force` to overwrite them after backups are created.
@@ -247,6 +249,7 @@ Useful examples:
 aiw doctor
 aiw doctor --gate git
 aiw doctor --gate cmux-new --agent codex
+aiw doctor --gate scratch --agent codex
 aiw doctor --gate commit --agent codex
 aiw doctor --json
 ```
@@ -282,6 +285,7 @@ aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --local --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 aiw layout --agent codex --dry-run
+aiw cmux scratch --agent codex --dry-run
 
 aiw workspace list
 aiw workspace list --json
@@ -367,6 +371,28 @@ The standard cmux layout is:
 ```
 
 `aiw layout --print-json` prints the cmux layout JSON without opening cmux.
+
+## Scratch Sessions
+
+Use `aiw cmux scratch` when you want an AI-ready cmux session that is not attached to a Git repository or Worktrunk worktree. `aiw scratch` is the short alias.
+
+```bash
+aiw scratch
+aiw cmux scratch
+aiw scratch --agent codex
+aiw scratch "api-notes" --agent codex
+aiw cmux scratch --agent codex
+aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
+```
+
+Behavior:
+
+- Sessions are created under `paths.sessions`, defaulting to `~/Documents/aiw`.
+- The directory layout is `YYYY-MM-DD/<session-id>`.
+- Without an explicit ID, AIW generates `HHMMSS-<uuid8>`.
+- The scratch layout opens Files and Agent panes only; it does not open Git or call Worktrunk.
+- `--root <path>` temporarily overrides `paths.sessions`.
+- `--dry-run` prints the directory and cmux command without creating anything.
 
 ## Workspace Management
 
@@ -566,6 +592,7 @@ git = "lazygit"
 [paths]
 code_root = "~/Code"
 worktrees = "~/worktrees"
+sessions = "~/Documents/aiw"
 
 [commit]
 agent = "codex"
@@ -601,6 +628,7 @@ Useful gates:
 aiw doctor --gate git
 aiw doctor --gate workspace
 aiw doctor --gate layout --agent codex
+aiw doctor --gate scratch --agent codex
 aiw doctor --gate cmux-new --agent codex
 aiw doctor --gate init --agent codex
 aiw doctor --gate commit --agent codex
@@ -610,6 +638,7 @@ Gate behavior:
 
 - `cmux-new` requires Git, Worktrunk, cmux, yazi, lazygit, nvim, the selected agent, and delta when the lazygit overlay is configured.
 - `layout` requires the layout tools, selected agent, and the same lazygit overlay dependencies, but not Worktrunk.
+- `scratch` requires cmux, yazi, nvim, and the selected agent, but not Git, Worktrunk, lazygit, or delta.
 - `init` checks the tools needed to bootstrap the default workflow before writing config.
 - `workspace` requires Git and Worktrunk.
 - `git` requires lazygit and delta when the lazygit overlay is configured.

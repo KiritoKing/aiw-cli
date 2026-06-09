@@ -126,11 +126,13 @@ npx --yes skills add . --list -y
 npx @chlrc/aiw init
 npx @chlrc/aiw init --cmux-scope home
 npx @chlrc/aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees
+npx @chlrc/aiw init --sessions-root ~/Documents/aiw
 npx @chlrc/aiw init --cmux-scope none --dry-run
 ```
 
 - AIW 配置默认写入 `~/.config/aiw`；设置了 `$AIW_CONFIG_DIR` 时使用它。
 - `--code-root` 和 `--worktrees-root` 控制写入 `aiw.toml` 的路径，默认是 `~/Code` 和 `~/worktrees`。
+- `--sessions-root` 控制写入 `aiw.toml` 的 scratch 会话根目录，默认是 `~/Documents/aiw`。
 - cmux 注册默认写入 `~/.config/cmux/cmux.json`；`--cmux-scope code` 写入 `<code-root>/.cmux/cmux.json`；`--cmux-scope none` 跳过 cmux。
 - 交互式终端中，init 会询问 cmux 注册位置；`--yes` 使用默认值且不提示。
 - 已存在的 AIW 配置默认保留；使用 `--force` 覆盖前会先创建备份。
@@ -247,6 +249,7 @@ AIW 假设用户应该能够替换工具、调整渲染、保留原生 shell 行
 aiw doctor
 aiw doctor --gate git
 aiw doctor --gate cmux-new --agent codex
+aiw doctor --gate scratch --agent codex
 aiw doctor --gate commit --agent codex
 aiw doctor --json
 ```
@@ -283,6 +286,7 @@ aiw cmux-new --pick-repo --agent codex
 aiw cmux-new --local --agent codex
 aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 aiw layout --agent codex --dry-run
+aiw cmux scratch --agent codex --dry-run
 
 aiw workspace list
 aiw workspace list --json
@@ -368,6 +372,28 @@ aiw cmux-new --local --agent codex
 ```
 
 `aiw layout --print-json` 可以只打印 cmux layout JSON，不打开 cmux。
+
+## Scratch 会话
+
+当你想打开一个不绑定 Git repo 或 Worktrunk worktree 的 AI-ready cmux 会话时，使用 `aiw cmux scratch`。`aiw scratch` 是短别名。
+
+```bash
+aiw scratch
+aiw cmux scratch
+aiw scratch --agent codex
+aiw scratch "api-notes" --agent codex
+aiw cmux scratch --agent codex
+aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
+```
+
+行为：
+
+- 会话创建在 `paths.sessions` 下，默认是 `~/Documents/aiw`。
+- 目录结构是 `YYYY-MM-DD/<session-id>`。
+- 不传显式 ID 时，AIW 会生成 `HHMMSS-<uuid8>`。
+- Scratch layout 只打开 Files 和 Agent，不打开 Git，也不调用 Worktrunk。
+- `--root <path>` 可以临时覆盖 `paths.sessions`。
+- `--dry-run` 只打印目录和 cmux 命令，不创建任何内容。
 
 ## Workspace 管理
 
@@ -567,6 +593,7 @@ git = "lazygit"
 [paths]
 code_root = "~/Code"
 worktrees = "~/worktrees"
+sessions = "~/Documents/aiw"
 
 [commit]
 agent = "codex"
@@ -602,6 +629,7 @@ commit_args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--col
 aiw doctor --gate git
 aiw doctor --gate workspace
 aiw doctor --gate layout --agent codex
+aiw doctor --gate scratch --agent codex
 aiw doctor --gate cmux-new --agent codex
 aiw doctor --gate init --agent codex
 aiw doctor --gate commit --agent codex
@@ -611,6 +639,7 @@ Gate 行为：
 
 - `cmux-new` 需要 Git、Worktrunk、cmux、yazi、lazygit、nvim、选定 agent；配置 lazygit overlay 时还需要 delta。
 - `layout` 需要 layout 相关工具、选定 agent，以及同一组 lazygit overlay 依赖，但不需要 Worktrunk。
+- `scratch` 需要 cmux、yazi、nvim 和选定 agent，不需要 Git、Worktrunk、lazygit 或 delta。
 - `init` 在写配置前检查默认工作流初始化所需工具。
 - `workspace` 需要 Git 和 Worktrunk。
 - `git` 在配置 lazygit overlay 时需要 lazygit 和 delta。

@@ -16,13 +16,15 @@ const AIW_CONFIG_FILES = [
 const AIW_ACTION_IDS = [
   "aiw-new-worktree",
   "aiw-pick-directory",
-  "aiw-local-workspace"
+  "aiw-local-workspace",
+  "aiw-scratch-session"
 ];
 
 const DEFAULT_CONTEXT_MENU = [
   { action: "aiw-new-worktree", title: "AIW New Worktree" },
   { action: "aiw-pick-directory", title: "AIW Pick Directory" },
   { action: "aiw-local-workspace", title: "AIW Local Workspace" },
+  { action: "aiw-scratch-session", title: "AIW Scratch Session" },
   { type: "separator" },
   { action: "cmux.newTerminal", title: "New Terminal" },
   { action: "cmux.newBrowser", title: "New Browser" }
@@ -54,6 +56,7 @@ export async function commandInit(config, argv) {
   const targetConfigDir = resolveConfigDir(flags.configDir);
   const codeRoot = path.resolve(expandHome(flags.codeRoot || path.join(os.homedir(), "Code")));
   const worktreesRoot = path.resolve(expandHome(flags.worktreesRoot || path.join(os.homedir(), "worktrees")));
+  const sessionsRoot = path.resolve(expandHome(flags.sessionsRoot || path.join(os.homedir(), "Documents", "aiw")));
   const cmuxScope = await selectCmuxScope(flags, codeRoot);
   const launcher = flags.launcher || process.env.AIW_INIT_COMMAND || "npx aiw";
   const plan = buildInitPlan({
@@ -62,6 +65,7 @@ export async function commandInit(config, argv) {
     targetConfigDir,
     codeRoot,
     worktreesRoot,
+    sessionsRoot,
     cmuxScope,
     launcher
   });
@@ -100,7 +104,7 @@ export async function commandInit(config, argv) {
   }
 }
 
-function buildInitPlan({ config, flags, targetConfigDir, codeRoot, worktreesRoot, cmuxScope, launcher }) {
+function buildInitPlan({ config, flags, targetConfigDir, codeRoot, worktreesRoot, sessionsRoot, cmuxScope, launcher }) {
   const sourceConfigDir = path.join(projectRoot(), "config");
   const cmuxPath = resolveCmuxPath(cmuxScope, codeRoot);
   const preflight = collectPreflight(config);
@@ -125,6 +129,7 @@ function buildInitPlan({ config, flags, targetConfigDir, codeRoot, worktreesRoot
       force: Boolean(flags.force),
       codeRoot,
       worktreesRoot,
+      sessionsRoot,
       configDir: targetConfigDir,
       cmuxScope,
       launcher
@@ -132,7 +137,8 @@ function buildInitPlan({ config, flags, targetConfigDir, codeRoot, worktreesRoot
     directories: [
       { path: targetConfigDir, action: fs.existsSync(targetConfigDir) ? "keep" : "create" },
       { path: codeRoot, action: fs.existsSync(codeRoot) ? "keep" : "create" },
-      { path: worktreesRoot, action: fs.existsSync(worktreesRoot) ? "keep" : "create" }
+      { path: worktreesRoot, action: fs.existsSync(worktreesRoot) ? "keep" : "create" },
+      { path: sessionsRoot, action: fs.existsSync(sessionsRoot) ? "keep" : "create" }
     ],
     aiwFiles,
     cmux: cmuxPath
@@ -305,7 +311,7 @@ function applyInitPlan(plan) {
     }
     const source = fs.readFileSync(file.source, "utf8");
     const next = file.name === "aiw.toml"
-      ? renderAiwToml(source, plan.options.codeRoot, plan.options.worktreesRoot, plan.options.configDir)
+      ? renderAiwToml(source, plan.options.codeRoot, plan.options.worktreesRoot, plan.options.sessionsRoot, plan.options.configDir)
       : source;
     fs.writeFileSync(file.target, next);
   }
@@ -314,10 +320,11 @@ function applyInitPlan(plan) {
   }
 }
 
-function renderAiwToml(source, codeRoot, worktreesRoot, configDir) {
+function renderAiwToml(source, codeRoot, worktreesRoot, sessionsRoot, configDir) {
   return source
     .replace(/^code_root\s*=\s*".*"$/m, `code_root = "${escapeToml(codeRoot)}"`)
     .replace(/^worktrees\s*=\s*".*"$/m, `worktrees = "${escapeToml(worktreesRoot)}"`)
+    .replace(/^sessions\s*=\s*".*"$/m, `sessions = "${escapeToml(sessionsRoot)}"`)
     .replace(/^core_config\s*=\s*".*"$/m, `core_config = "${escapeToml(configDir)}"`);
 }
 
@@ -351,6 +358,12 @@ function mergeCmuxConfig(existing, launcher, cmuxPlan) {
     subtitle: "Open the current checkout without creating a worktree",
     command: `${launcher} cmux-new --local`,
     icon: "terminal"
+  });
+  actions["aiw-scratch-session"] = cmuxAction({
+    title: "AIW Scratch Session",
+    subtitle: "Open a non-project AIW session",
+    command: `${launcher} cmux scratch`,
+    icon: "square.and.pencil"
   });
   next.actions = actions;
 
@@ -391,12 +404,14 @@ function mergeContextMenu(currentMenu) {
     return DEFAULT_CONTEXT_MENU;
   }
   return [
-    DEFAULT_CONTEXT_MENU[0],
-    DEFAULT_CONTEXT_MENU[1],
-    DEFAULT_CONTEXT_MENU[2],
+    ...defaultAiwContextMenuItems(),
     { type: "separator" },
     ...trimLeadingSeparators(nonAiwItems)
   ];
+}
+
+function defaultAiwContextMenuItems() {
+  return DEFAULT_CONTEXT_MENU.filter((item) => isPlainObject(item) && AIW_ACTION_IDS.includes(item.action));
 }
 
 function trimLeadingSeparators(items) {
@@ -657,6 +672,9 @@ function parseInitFlags(argv) {
       case "--worktrees-root":
         flags.worktreesRoot = argv[++index];
         break;
+      case "--sessions-root":
+        flags.sessionsRoot = argv[++index];
+        break;
       case "--launcher":
       case "--command-prefix":
         flags.launcher = argv[++index];
@@ -698,6 +716,7 @@ Options:
   --config-dir <path>             AIW config directory; defaults to AIW_CONFIG_DIR or ~/.config/aiw
   --code-root <path>              Code root written to aiw.toml; defaults to ~/Code
   --worktrees-root <path>         Worktree root written to aiw.toml; defaults to ~/worktrees
+  --sessions-root <path>          Scratch session root written to aiw.toml; defaults to ~/Documents/aiw
   --launcher <command>            Command prefix stored in cmux actions; defaults to "npx aiw"
   --force                         Overwrite existing AIW config files after creating backups
   --yes                           Use defaults without prompts

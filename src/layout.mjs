@@ -3,6 +3,10 @@ import { aiwBinPath, resolveAgent } from "./config.mjs";
 import { quoteShell } from "./run.mjs";
 
 export function buildLayout(config, agentName) {
+  return buildProjectLayout(config, agentName);
+}
+
+export function buildProjectLayout(config, agentName) {
   const agent = resolveAgent(config, agentName);
   const aiw = quoteShell(aiwBinPath());
   const agentCommand = [agent.cmd, ...agent.args].map(quoteShell).join(" ");
@@ -23,9 +27,29 @@ export function buildLayout(config, agentName) {
   };
 }
 
+export function buildScratchLayout(config, agentName) {
+  const agent = resolveAgent(config, agentName);
+  const aiw = quoteShell(aiwBinPath());
+  const agentCommand = [agent.cmd, ...agent.args].map(quoteShell).join(" ");
+  return {
+    direction: "horizontal",
+    split: 0.34,
+    children: [
+      terminalPane("Files", `${aiw} files`),
+      terminalPane(agentTitle(agent.name), agentCommand)
+    ]
+  };
+}
+
 export function workspaceName(cwd, agentName) {
   const repo = path.basename(cwd);
   return `AI ${agentName}: ${repo}`;
+}
+
+export function scratchWorkspaceName(cwd, agentName) {
+  const date = path.basename(path.dirname(cwd));
+  const session = path.basename(cwd);
+  return `AI ${agentName}: ${date}/${session}`;
 }
 
 function terminalPane(name, command) {

@@ -53,6 +53,7 @@ The current CLI default launcher is `npx aiw`; `--launcher` controls the command
    - Config: `~/.config/aiw`, or `$AIW_CONFIG_DIR` when set.
    - Code root: default `~/Code`.
    - Worktrees root: default `~/worktrees`.
+   - Scratch sessions root: default `~/Documents/aiw`.
    - cmux scope: `home`, `code`, or `none`.
 
 2. Run dependency and setup preflight:
@@ -82,6 +83,7 @@ Useful variants:
 ```bash
 npx @chlrc/aiw init --cmux-scope home --yes
 npx @chlrc/aiw init --cmux-scope code --code-root ~/Code --worktrees-root ~/worktrees --yes
+npx @chlrc/aiw init --sessions-root ~/Documents/aiw --yes
 npx @chlrc/aiw init --cmux-scope none --dry-run --yes
 npx @chlrc/aiw init --config-dir ~/.config/aiw --no-reload --yes
 ```
@@ -99,6 +101,7 @@ When validating cmux registration, check that the AIW actions exist rather than 
 - `aiw-new-worktree` -> `aiw cmux-new`
 - `aiw-pick-directory` -> `aiw cmux-new --pick-repo`
 - `aiw-local-workspace` -> `aiw cmux-new --local`
+- `aiw-scratch-session` -> `aiw cmux scratch`
 
 ## Troubleshooting
 

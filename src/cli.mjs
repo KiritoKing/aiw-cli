@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expandHome, loadConfig, resolveAgent, aiwBinPath } from "./config.mjs";
@@ -7,7 +8,7 @@ import { assertGate, printDoctor } from "./deps.mjs";
 import { assertGitRoot, gitRoot, isDirty, resolveRepo, selectBranch } from "./git.mjs";
 import { runWorkspaceHook } from "./hooks.mjs";
 import { commandInit } from "./init.mjs";
-import { buildLayout, workspaceName } from "./layout.mjs";
+import { buildLayout, buildScratchLayout, scratchWorkspaceName, workspaceName } from "./layout.mjs";
 import { commandExists, quoteShell, runInherit, sleep } from "./run.mjs";
 import { commandWorkspace, recordWorkspaceTarget } from "./workspace.mjs";
 
@@ -37,9 +38,17 @@ export async function main(argv) {
         await commandCmuxNew(config, rest.slice(1), "cmux-new");
         return;
       }
+      if (["scratch", "session"].includes(normalizeCommand(rest[0] || ""))) {
+        await commandScratch(config, rest.slice(1));
+        return;
+      }
       break;
     case "layout":
       await commandLayout(config, rest);
+      return;
+    case "scratch":
+    case "session":
+      await commandScratch(config, rest);
       return;
     case "workspace":
     case "ws":
@@ -219,6 +228,42 @@ async function commandLayout(config, argv) {
   ]);
 }
 
+async function commandScratch(config, argv) {
+  const flags = parseFlags(argv);
+  const agentFromArgs = flags.positionals.find((item) => isKnownAgent(config, item));
+  const idFromArgs = flags.positionals.find((item) => !isKnownAgent(config, item));
+  const agent = await selectAgent(config, flags.agent || agentFromArgs);
+  assertGate("scratch", config, agent);
+
+  const root = path.resolve(expandHome(flags.root || config.paths.sessions));
+  const now = new Date();
+  const date = localDateStamp(now);
+  const sessionId = normalizeSessionId(flags.id || idFromArgs || generatedSessionId(now));
+  const sessionPath = path.join(root, date, sessionId);
+  const layout = buildScratchLayout(config, agent.name);
+  const layoutJson = JSON.stringify(layout);
+
+  if (flags.dryRun) {
+    console.log(`mkdir -p ${quoteShell(sessionPath)}`);
+    console.log(`cmux new-workspace --name ${quoteShell(scratchWorkspaceName(sessionPath, agent.name))} --cwd ${quoteShell(sessionPath)} --focus true --layout ${quoteShell(layoutJson)}`);
+    return;
+  }
+
+  fs.mkdirSync(sessionPath, { recursive: true });
+  console.log(`[aiw scratch] ${sessionPath}`);
+  await runInherit("cmux", [
+    "new-workspace",
+    "--name",
+    scratchWorkspaceName(sessionPath, agent.name),
+    "--cwd",
+    sessionPath,
+    "--focus",
+    "true",
+    "--layout",
+    layoutJson
+  ]);
+}
+
 async function commandDiff(config, argv) {
   const flags = parseFlags(argv);
   assertGate("diff", config);
@@ -348,6 +393,13 @@ function parseFlags(argv) {
       case "--repo":
         flags.repo = argv[++index];
         break;
+      case "--root":
+        flags.root = argv[++index];
+        break;
+      case "--id":
+      case "--session-id":
+        flags.id = argv[++index];
+        break;
       case "--prompt":
         flags.prompt = argv[++index];
         break;
@@ -421,6 +473,32 @@ async function selectAgent(config, requestedAgent) {
   return resolveAgent(config, selected);
 }
 
+function localDateStamp(date) {
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate())
+  ].join("-");
+}
+
+function generatedSessionId(date) {
+  return `${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}-${randomUUID().slice(0, 8)}`;
+}
+
+function normalizeSessionId(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[/\\]+/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
+  return normalized || generatedSessionId(new Date());
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
 function printHelp() {
   const executable = path.relative(process.cwd(), fileURLToPath(import.meta.url)).startsWith("..")
     ? "aiw"
@@ -428,9 +506,10 @@ function printHelp() {
   console.log(`Usage: ${executable} <command> [options]
 
 Commands:
-  init [--cmux-scope <home|code|none>] [--code-root <path>] [--config-dir <path>] [--dry-run]
-  doctor [--json] [--gate <p0|init|layout|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
+  init [--cmux-scope <home|code|none>] [--code-root <path>] [--worktrees-root <path>] [--sessions-root <path>] [--config-dir <path>] [--dry-run]
+  doctor [--json] [--gate <p0|init|layout|scratch|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
   cmux-new|new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
+  scratch|session|cmux scratch [id] [--agent <name>] [--root <path>] [--id <id>] [--dry-run]
   layout [--agent <name>] [--print-json] [--dry-run]
   workspace|ws <list|open|done|remove|gc> [options]
   commit [--agent <name>] [--prompt <text>] [--prompt-file <path>] [--retries <n>] [--dry-run] [--print-prompt]

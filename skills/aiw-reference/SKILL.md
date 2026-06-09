@@ -1,6 +1,6 @@
 ---
 name: aiw-reference
-description: Operate the AIW CLI directly for workspace automation, Git review, diff inspection, AI commits, cmux layout launching, Worktrunk worktree lifecycle, workspace garbage collection, and finishing feature branches. Use when the user asks an agent to run AIW commands, clean workspaces, merge back to a target branch, open or create AIW workspaces, automate AIW flows, or explain AIW command behavior.
+description: Operate the AIW CLI directly for workspace automation, scratch sessions, Git review, diff inspection, AI commits, cmux layout launching, Worktrunk worktree lifecycle, workspace garbage collection, and finishing feature branches. Use when the user asks an agent to run AIW commands, clean workspaces, merge back to a target branch, open or create AIW workspaces, start non-project AI sessions, automate AIW flows, or explain AIW command behavior.
 ---
 
 # AIW Reference
@@ -16,6 +16,7 @@ Use AIW as the orchestration layer around existing terminal tools. AIW decides t
 - Use dry-run or preview modes when available before applying changes. `gc --dry-run` is the default safe way to inspect cleanup.
 - Do not run `aiw done` from the main checkout. It is only valid inside a feature worktree and refuses dirty worktrees.
 - Do not silently stage files for `aiw commit`. AIW commit reads staged changes only; the user or agent must intentionally stage changes first.
+- Use `aiw cmux scratch` or the short alias `aiw scratch` for non-project sessions. Scratch sessions are not Worktrunk worktrees and should not be finished with `aiw done`.
 - Keep personal AIW workflow files out of business repositories unless the user explicitly asks for project-local config.
 
 ## Resolve the AIW Command
@@ -82,6 +83,19 @@ aiw workspace open feat/foo --agent codex --dry-run
 aiw workspace open /path/to/worktree --agent codex --dry-run
 aiw open feat/foo --agent codex
 ```
+
+## Open Scratch Sessions
+
+Create a non-project AIW session under `paths.sessions`, defaulting to `~/Documents/aiw/YYYY-MM-DD/<session-id>`:
+
+```bash
+aiw scratch --agent codex
+aiw cmux scratch --agent codex
+aiw scratch notes --agent codex
+aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
+```
+
+Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC.
 
 ## Review, Diff, and Commit
 
