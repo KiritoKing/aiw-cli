@@ -92,10 +92,15 @@ Create a non-project AIW session under `paths.sessions`, defaulting to `~/Docume
 aiw scratch --agent codex
 aiw cmux scratch --agent codex
 aiw scratch notes --agent codex
+aiw scratch --message "Compare release blockers"
+aiw scratch list
+aiw scratch resume
+aiw scratch resume --query "2026-06-09 release"
+aiw scratch resume --id 142939-912bdf48
 aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 ```
 
-Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC.
+Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC. New scratch sessions write `.aiw-session.json`; resume uses fzf over time, ID, first message, and path so dates and content are both searchable.
 
 ## Review, Diff, and Commit
 

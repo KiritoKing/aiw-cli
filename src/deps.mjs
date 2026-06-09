@@ -137,6 +137,9 @@ function requirementsFor(profile, config, agent) {
     case "scratch":
     case "session":
       return req(["cmux", "yazi", "nvim", agentCmd].filter(Boolean));
+    case "scratch-resume":
+    case "session-resume":
+      return req(["cmux", "yazi", "nvim", "fzf", agentCmd].filter(Boolean));
     case "cmux-new":
     case "new":
       return req(["git", "wt", "cmux", "yazi", "nvim", ...gitDeps, agentCmd].filter(Boolean));

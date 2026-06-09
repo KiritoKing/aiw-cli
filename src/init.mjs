@@ -17,7 +17,8 @@ const AIW_ACTION_IDS = [
   "aiw-new-worktree",
   "aiw-pick-directory",
   "aiw-local-workspace",
-  "aiw-scratch-session"
+  "aiw-scratch-session",
+  "aiw-scratch-resume"
 ];
 
 const DEFAULT_CONTEXT_MENU = [
@@ -25,6 +26,7 @@ const DEFAULT_CONTEXT_MENU = [
   { action: "aiw-pick-directory", title: "AIW Pick Directory" },
   { action: "aiw-local-workspace", title: "AIW Local Workspace" },
   { action: "aiw-scratch-session", title: "AIW Scratch Session" },
+  { action: "aiw-scratch-resume", title: "AIW Resume Scratch Session" },
   { type: "separator" },
   { action: "cmux.newTerminal", title: "New Terminal" },
   { action: "cmux.newBrowser", title: "New Browser" }
@@ -364,6 +366,12 @@ function mergeCmuxConfig(existing, launcher, cmuxPlan) {
     subtitle: "Open a non-project AIW session",
     command: `${launcher} cmux scratch`,
     icon: "square.and.pencil"
+  });
+  actions["aiw-scratch-resume"] = cmuxAction({
+    title: "AIW Resume Scratch Session",
+    subtitle: "Pick a previous non-project AIW session",
+    command: `${launcher} cmux scratch resume`,
+    icon: "clock.arrow.circlepath"
   });
   next.actions = actions;
 

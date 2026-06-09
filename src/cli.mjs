@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expandHome, loadConfig, resolveAgent, aiwBinPath } from "./config.mjs";
 import { runCommit, runCommitMessage } from "./commit.mjs";
@@ -229,6 +230,16 @@ async function commandLayout(config, argv) {
 }
 
 async function commandScratch(config, argv) {
+  const subcommand = normalizeCommand(argv[0] || "");
+  if (subcommand === "resume" || subcommand === "open") {
+    await commandScratchResume(config, argv.slice(1));
+    return;
+  }
+  if (subcommand === "list" || subcommand === "ls") {
+    commandScratchList(config, argv.slice(1));
+    return;
+  }
+
   const flags = parseFlags(argv);
   const agentFromArgs = flags.positionals.find((item) => isKnownAgent(config, item));
   const idFromArgs = flags.positionals.find((item) => !isKnownAgent(config, item));
@@ -240,28 +251,85 @@ async function commandScratch(config, argv) {
   const date = localDateStamp(now);
   const sessionId = normalizeSessionId(flags.id || idFromArgs || generatedSessionId(now));
   const sessionPath = path.join(root, date, sessionId);
-  const layout = buildScratchLayout(config, agent.name);
-  const layoutJson = JSON.stringify(layout);
+  const firstMessage = normalizeFirstMessage(flags.message || flags.firstMessage || idFromArgs || "");
 
   if (flags.dryRun) {
     console.log(`mkdir -p ${quoteShell(sessionPath)}`);
-    console.log(`cmux new-workspace --name ${quoteShell(scratchWorkspaceName(sessionPath, agent.name))} --cwd ${quoteShell(sessionPath)} --focus true --layout ${quoteShell(layoutJson)}`);
+    console.log(`write ${quoteShell(sessionMetadataPath(sessionPath))}`);
+    printScratchOpenCommand(config, agent.name, sessionPath);
     return;
   }
 
   fs.mkdirSync(sessionPath, { recursive: true });
+  writeSessionMetadata(sessionPath, {
+    id: sessionId,
+    agent: agent.name,
+    createdAt: now.toISOString(),
+    firstMessage,
+    root,
+    path: sessionPath
+  });
   console.log(`[aiw scratch] ${sessionPath}`);
+  await openScratchSession(config, agent.name, sessionPath);
+}
+
+async function commandScratchResume(config, argv) {
+  const flags = parseFlags(argv);
+  const agent = await selectAgent(config, flags.agent);
+  assertGate(flags.id ? "scratch" : "scratch-resume", config, agent);
+  const root = path.resolve(expandHome(flags.root || config.paths.sessions));
+  const sessions = listScratchSessions(root);
+  if (sessions.length === 0) {
+    const error = new Error(`no scratch sessions found under ${root}`);
+    error.exitCode = 4;
+    throw error;
+  }
+  const selected = flags.id
+    ? selectSessionByIdOrPath(sessions, flags.id)
+    : pickScratchSession(sessions, flags.query || flags.positionals.join(" "));
+  if (flags.dryRun) {
+    printScratchOpenCommand(config, agent.name, selected.path);
+    return;
+  }
+  await openScratchSession(config, agent.name, selected.path);
+}
+
+function commandScratchList(config, argv) {
+  const flags = parseFlags(argv);
+  const root = path.resolve(expandHome(flags.root || config.paths.sessions));
+  const sessions = listScratchSessions(root);
+  if (flags.json) {
+    console.log(JSON.stringify(sessions, null, 2));
+    return;
+  }
+  if (sessions.length === 0) {
+    console.log(`No scratch sessions found under ${root}`);
+    return;
+  }
+  for (const session of sessions) {
+    console.log(sessionDisplayLine(session));
+  }
+}
+
+async function openScratchSession(config, agentName, sessionPath) {
+  const layout = buildScratchLayout(config, agentName);
   await runInherit("cmux", [
     "new-workspace",
     "--name",
-    scratchWorkspaceName(sessionPath, agent.name),
+    scratchWorkspaceName(sessionPath, agentName),
     "--cwd",
     sessionPath,
     "--focus",
     "true",
     "--layout",
-    layoutJson
+    JSON.stringify(layout)
   ]);
+}
+
+function printScratchOpenCommand(config, agentName, sessionPath) {
+  const layout = buildScratchLayout(config, agentName);
+  const layoutJson = JSON.stringify(layout);
+  console.log(`cmux new-workspace --name ${quoteShell(scratchWorkspaceName(sessionPath, agentName))} --cwd ${quoteShell(sessionPath)} --focus true --layout ${quoteShell(layoutJson)}`);
 }
 
 async function commandDiff(config, argv) {
@@ -400,6 +468,14 @@ function parseFlags(argv) {
       case "--session-id":
         flags.id = argv[++index];
         break;
+      case "--message":
+      case "--first-message":
+        flags.message = argv[++index];
+        flags.firstMessage = flags.message;
+        break;
+      case "--query":
+        flags.query = argv[++index];
+        break;
       case "--prompt":
         flags.prompt = argv[++index];
         break;
@@ -495,6 +571,168 @@ function normalizeSessionId(value) {
   return normalized || generatedSessionId(new Date());
 }
 
+function sessionMetadataPath(sessionPath) {
+  return path.join(sessionPath, ".aiw-session.json");
+}
+
+function writeSessionMetadata(sessionPath, metadata) {
+  const payload = {
+    schema: 1,
+    type: "scratch",
+    id: metadata.id,
+    agent: metadata.agent,
+    created_at: metadata.createdAt,
+    first_message: metadata.firstMessage || "",
+    root: metadata.root,
+    path: metadata.path
+  };
+  fs.writeFileSync(sessionMetadataPath(sessionPath), `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function listScratchSessions(root) {
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+  const sessions = [];
+  for (const dateEntry of safeReadDir(root)) {
+    const datePath = path.join(root, dateEntry.name);
+    if (!dateEntry.isDirectory()) {
+      continue;
+    }
+    for (const sessionEntry of safeReadDir(datePath)) {
+      if (!sessionEntry.isDirectory()) {
+        continue;
+      }
+      const sessionPath = path.join(datePath, sessionEntry.name);
+      sessions.push(readScratchSession(root, dateEntry.name, sessionEntry.name, sessionPath));
+    }
+  }
+  return sessions.sort((left, right) => right.createdAtMs - left.createdAtMs || right.path.localeCompare(left.path));
+}
+
+function readScratchSession(root, date, id, sessionPath) {
+  const metadata = readSessionMetadata(sessionPath);
+  const stat = safeStat(sessionPath);
+  const createdAt = metadata.created_at || (stat ? stat.mtime.toISOString() : "");
+  const createdAtMs = Date.parse(createdAt) || (stat ? stat.mtimeMs : 0);
+  return {
+    id: String(metadata.id || id),
+    date,
+    createdAt,
+    createdAtMs,
+    time: createdAt ? localDateTimeStamp(new Date(createdAtMs || createdAt)) : "",
+    firstMessage: String(metadata.first_message || ""),
+    agent: String(metadata.agent || ""),
+    root,
+    path: sessionPath
+  };
+}
+
+function readSessionMetadata(sessionPath) {
+  const metadataPath = sessionMetadataPath(sessionPath);
+  if (!fs.existsSync(metadataPath)) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function pickScratchSession(sessions, query) {
+  if (!process.stdin.isTTY) {
+    const error = new Error("scratch resume requires an interactive terminal; pass --id to select non-interactively");
+    error.exitCode = 4;
+    throw error;
+  }
+  const lines = sessions.map(sessionTuiLine);
+  const args = [
+    "--prompt",
+    "Scratch session> ",
+    "--delimiter",
+    "\t",
+    "--with-nth",
+    "1,2,3"
+  ];
+  if (query) {
+    args.push("--query", query);
+  }
+  const result = spawnSync("fzf", args, {
+    input: `${lines.join("\n")}\n`,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "inherit"]
+  });
+  if (result.status !== 0 || !result.stdout.trim()) {
+    const error = new Error("scratch resume cancelled");
+    error.exitCode = 4;
+    throw error;
+  }
+  const selectedPath = result.stdout.trim().split("\t").at(-1);
+  const selected = sessions.find((session) => session.path === selectedPath);
+  if (!selected) {
+    const error = new Error("selected scratch session no longer exists");
+    error.exitCode = 4;
+    throw error;
+  }
+  return selected;
+}
+
+function selectSessionByIdOrPath(sessions, value) {
+  const expanded = path.resolve(expandHome(value));
+  if (path.isAbsolute(expandHome(value))) {
+    const selectedByPath = sessions.find((session) => session.path === expanded);
+    if (selectedByPath) {
+      return selectedByPath;
+    }
+  }
+  const selected = sessions.find((session) => session.id === value || path.basename(session.path) === value);
+  if (selected) {
+    return selected;
+  }
+  const error = new Error(`scratch session not found: ${value}`);
+  error.exitCode = 4;
+  throw error;
+}
+
+function sessionTuiLine(session) {
+  return [
+    session.time || session.date,
+    session.id,
+    normalizeFirstMessage(session.firstMessage) || "(no first message)",
+    session.path
+  ].join("\t");
+}
+
+function sessionDisplayLine(session) {
+  return `${session.time || session.date}  ${session.id}  ${normalizeFirstMessage(session.firstMessage) || "(no first message)"}  ${session.path}`;
+}
+
+function normalizeFirstMessage(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function safeReadDir(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+function safeStat(targetPath) {
+  try {
+    return fs.statSync(targetPath);
+  } catch {
+    return null;
+  }
+}
+
+function localDateTimeStamp(date) {
+  return `${localDateStamp(date)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -507,9 +745,11 @@ function printHelp() {
 
 Commands:
   init [--cmux-scope <home|code|none>] [--code-root <path>] [--worktrees-root <path>] [--sessions-root <path>] [--config-dir <path>] [--dry-run]
-  doctor [--json] [--gate <p0|init|layout|scratch|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
+  doctor [--json] [--gate <p0|init|layout|scratch|scratch-resume|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
   cmux-new|new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
-  scratch|session|cmux scratch [id] [--agent <name>] [--root <path>] [--id <id>] [--dry-run]
+  scratch|session|cmux scratch [id] [--agent <name>] [--root <path>] [--id <id>] [--message <text>] [--dry-run]
+  scratch resume [--agent <name>] [--root <path>] [--id <id>] [--query <text>] [--dry-run]
+  scratch list [--root <path>] [--json]
   layout [--agent <name>] [--print-json] [--dry-run]
   workspace|ws <list|open|done|remove|gc> [options]
   commit [--agent <name>] [--prompt <text>] [--prompt-file <path>] [--retries <n>] [--dry-run] [--print-prompt]

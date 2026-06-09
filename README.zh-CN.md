@@ -383,6 +383,11 @@ aiw cmux scratch
 aiw scratch --agent codex
 aiw scratch "api-notes" --agent codex
 aiw cmux scratch --agent codex
+aiw scratch --message "Compare release blockers"
+aiw scratch list
+aiw scratch resume
+aiw scratch resume --query "2026-06-09 release"
+aiw scratch resume --id 142939-912bdf48
 aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 ```
 
@@ -391,7 +396,12 @@ aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 - 会话创建在 `paths.sessions` 下，默认是 `~/Documents/aiw`。
 - 目录结构是 `YYYY-MM-DD/<session-id>`。
 - 不传显式 ID 时，AIW 会生成 `HHMMSS-<uuid8>`。
+- 新会话会写入 `.aiw-session.json`，记录创建时间、agent、session ID 和第一条消息。
 - Scratch layout 只打开 Files 和 Agent，不打开 Git，也不调用 Worktrunk。
+- `aiw scratch list` 打印往期 scratch 会话。
+- `aiw scratch resume` 打开 fzf picker，候选行包含时间、session ID、第一条消息和路径，因此可以按内容或日期模糊匹配。
+- `aiw scratch resume --id <id>` 不进 TUI，直接重新打开指定会话。
+- `aiw init` 会注册 `aiw-scratch-session` 和 `aiw-scratch-resume` 两个 cmux action。
 - `--root <path>` 可以临时覆盖 `paths.sessions`。
 - `--dry-run` 只打印目录和 cmux 命令，不创建任何内容。
 
@@ -630,6 +640,7 @@ aiw doctor --gate git
 aiw doctor --gate workspace
 aiw doctor --gate layout --agent codex
 aiw doctor --gate scratch --agent codex
+aiw doctor --gate scratch-resume --agent codex
 aiw doctor --gate cmux-new --agent codex
 aiw doctor --gate init --agent codex
 aiw doctor --gate commit --agent codex
@@ -640,6 +651,7 @@ Gate 行为：
 - `cmux-new` 需要 Git、Worktrunk、cmux、yazi、lazygit、nvim、选定 agent；配置 lazygit overlay 时还需要 delta。
 - `layout` 需要 layout 相关工具、选定 agent，以及同一组 lazygit overlay 依赖，但不需要 Worktrunk。
 - `scratch` 需要 cmux、yazi、nvim 和选定 agent，不需要 Git、Worktrunk、lazygit 或 delta。
+- `scratch-resume` 会额外要求 fzf，用于 resume picker。
 - `init` 在写配置前检查默认工作流初始化所需工具。
 - `workspace` 需要 Git 和 Worktrunk。
 - `git` 在配置 lazygit overlay 时需要 lazygit 和 delta。

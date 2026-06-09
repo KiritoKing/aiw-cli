@@ -102,6 +102,7 @@ When validating cmux registration, check that the AIW actions exist rather than 
 - `aiw-pick-directory` -> `aiw cmux-new --pick-repo`
 - `aiw-local-workspace` -> `aiw cmux-new --local`
 - `aiw-scratch-session` -> `aiw cmux scratch`
+- `aiw-scratch-resume` -> `aiw cmux scratch resume`
 
 ## Troubleshooting
 
