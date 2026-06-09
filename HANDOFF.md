@@ -4,7 +4,7 @@
 
 ## 当前活动
 
-Scratch session 管理能力已实现并验证；真实 cmux 配置已重刷为本地 checkout launcher。
+Scratch session 管理能力已实现、验证并推送；当前在准备 npm `0.1.2` 发布，但本机 npm 登录态返回 `E401 Unauthorized`。
 
 ## 本次已处理
 
@@ -67,10 +67,16 @@ node /Users/bytedance/Code/aiw/bin/aiw cmux scratch resume
 
 ## 当前 Git 状态
 
-- 本地 `master` 领先 `origin/master` 3 个历史提交。
-- 本次 session resume 改动尚未提交。
+- `master` 已推送到 `origin/master`，最新功能提交为 `c8c22b7 feat(scratch): add session resume picker`。
+- `package.json` 已将版本从 `0.1.1` bump 到 `0.1.2`，用于避开 npm registry 上已存在的 `0.1.1`。
+- npm registry 当前线上版本：`0.1.1`。
+- 本机 `npm whoami --registry=https://registry.npmjs.org/` 返回 `E401 Unauthorized`，发布需要先完成 npm 登录或注入有效 `NPM_TOKEN`。
 
 ## 后续建议
 
-- 提交本次改动。
-- 网络可用后 push 并发布新版本。
+- 提交并推送 `0.1.2` 版本 bump。
+- npm auth 修复后执行：
+
+```bash
+npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache
+```

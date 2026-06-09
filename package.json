@@ -1,6 +1,6 @@
 {
   "name": "@chlrc/aiw",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Personal AI workflow bridge for cmux, Worktrunk, and CLI agents.",
   "keywords": [
