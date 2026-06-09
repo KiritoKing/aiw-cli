@@ -123,3 +123,41 @@ npm publish --access public --registry=https://registry.npmjs.org/ --cache /priv
 
 - 在本机终端完成 cmux 初始化后，运行 `cmux reload-config` 或确认 `aiw init` 自动 reload 成功。
 - 在有外网 DNS 的终端完成 `git push origin master` 和 `npm publish`。
+
+## 已发现问题：cmux launcher 包名错误
+
+- 用户在 cmux 里触发 `npx aiw cmux-new --pick-repo` 时，npx 命中了 npm 上另一个未 scoped 包：
+
+```text
+Need to install the following packages:
+aiw@1.0.0
+```
+
+- 根因：`src/init.mjs` 的默认 `launcher` 是 `npx aiw`，而本项目的正确包名是 `@chlrc/aiw`。
+- 已在代码中修复默认值为：
+
+```text
+npx --yes @chlrc/aiw
+```
+
+- 当前实际 `~/.config/cmux/cmux.json` 仍含旧命令：
+
+```text
+npx aiw cmux-new
+npx aiw cmux-new --pick-repo
+npx aiw cmux-new --local
+npx aiw cmux scratch
+```
+
+- 当前 Codex 沙箱不能写 `~/.config/cmux/cmux.json`，执行 `node bin/aiw init --yes --cmux-scope home` 失败于：
+
+```text
+EPERM: operation not permitted, copyfile '/Users/bytedance/.config/cmux/cmux.json' -> '/Users/bytedance/.config/cmux/cmux.json.20260609T084710.bak'
+```
+
+- 需要在用户本机终端运行本地 checkout 的修复版 init：
+
+```bash
+cd /Users/bytedance/Code/aiw
+node bin/aiw init --yes --cmux-scope home
+```
