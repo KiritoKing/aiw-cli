@@ -58,7 +58,7 @@ export async function commandInit(config, argv) {
   const worktreesRoot = path.resolve(expandHome(flags.worktreesRoot || path.join(os.homedir(), "worktrees")));
   const sessionsRoot = path.resolve(expandHome(flags.sessionsRoot || path.join(os.homedir(), "Documents", "aiw")));
   const cmuxScope = await selectCmuxScope(flags, codeRoot);
-  const launcher = flags.launcher || process.env.AIW_INIT_COMMAND || "npx aiw";
+  const launcher = flags.launcher || process.env.AIW_INIT_COMMAND || "npx --yes @chlrc/aiw";
   const plan = buildInitPlan({
     config,
     flags,
@@ -717,7 +717,7 @@ Options:
   --code-root <path>              Code root written to aiw.toml; defaults to ~/Code
   --worktrees-root <path>         Worktree root written to aiw.toml; defaults to ~/worktrees
   --sessions-root <path>          Scratch session root written to aiw.toml; defaults to ~/Documents/aiw
-  --launcher <command>            Command prefix stored in cmux actions; defaults to "npx aiw"
+  --launcher <command>            Command prefix stored in cmux actions; defaults to "npx --yes @chlrc/aiw"
   --force                         Overwrite existing AIW config files after creating backups
   --yes                           Use defaults without prompts
   --dry-run                       Print the plan without writing files

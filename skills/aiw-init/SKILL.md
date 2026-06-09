@@ -39,13 +39,13 @@ For frequent use, local customization, or AIW development, a local checkout is r
 node bin/aiw --help
 ```
 
-When initializing from the scoped package, store the same launcher in cmux actions unless the user has already installed an `aiw` binary:
+When initializing from the scoped package, store the scoped launcher in cmux actions unless the user has already installed an `aiw` binary:
 
 ```bash
-npx @chlrc/aiw init --launcher "npx @chlrc/aiw" --dry-run --yes
+npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --dry-run --yes
 ```
 
-The current CLI default launcher is `npx aiw`; `--launcher` controls the command prefix written into cmux actions such as `aiw-new-worktree`.
+The current CLI default launcher is `npx --yes @chlrc/aiw`; `--launcher` controls the command prefix written into cmux actions such as `aiw-new-worktree`. Do not use `npx aiw`; that resolves to a different npm package.
 
 ## Setup Workflow
 
@@ -67,7 +67,7 @@ aiw init --dry-run --yes
 For first-time package bootstrap:
 
 ```bash
-npx @chlrc/aiw init --launcher "npx @chlrc/aiw" --dry-run --yes
+npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --dry-run --yes
 ```
 
 3. Explain blockers using the preflight output. Blocking setup dependencies include Node/npx, Git, Worktrunk (`wt`), cmux, yazi, lazygit, nvim, the default layout/commit agent, and `delta` when the lazygit overlay is configured. Optional tools such as `fd`, `eza`, and non-default agents should be reported without blocking unrelated setup.
@@ -75,7 +75,7 @@ npx @chlrc/aiw init --launcher "npx @chlrc/aiw" --dry-run --yes
 4. Apply only after the user intends it:
 
 ```bash
-npx @chlrc/aiw init --launcher "npx @chlrc/aiw" --yes
+npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --yes
 ```
 
 Useful variants:
