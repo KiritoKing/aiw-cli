@@ -73,6 +73,7 @@ function normalizePaths(paths) {
   return {
     code_root: expandHome(paths.code_root || path.join(os.homedir(), "Code")),
     worktrees: expandHome(paths.worktrees || "~/worktrees"),
+    sessions: expandHome(paths.sessions || "~/Documents/aiw"),
     core_config: expandHome(paths.core_config || ROOT)
   };
 }

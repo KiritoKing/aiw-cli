@@ -10,6 +10,7 @@ tree_depth = 3
 [paths]
 code_root = "~/Code"
 worktrees = "~/worktrees"
+sessions = "~/Documents/aiw"
 core_config = "~/.config/aiw"
 
 [behavior]
