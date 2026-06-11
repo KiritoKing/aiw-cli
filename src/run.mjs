@@ -21,12 +21,16 @@ export function capture(command, args = [], options = {}) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
+  const stdout = outputText(result.stdout);
+  const stderr = outputText(result.stderr);
+  const spawnError = errorText(result.error);
   if (result.status !== 0) {
-    const error = new Error((result.stderr || result.stdout || `${command} failed`).trim());
+    const message = [stderr, stdout, spawnError].filter(Boolean).join("\n") || `${command} failed`;
+    const error = new Error(message.trim());
     error.exitCode = result.status || 1;
     throw error;
   }
-  return result.stdout.trim();
+  return stdout.trim();
 }
 
 export function tryCapture(command, args = [], options = {}) {
@@ -37,11 +41,14 @@ export function tryCapture(command, args = [], options = {}) {
     input: options.input,
     stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
   });
+  const stdout = outputText(result.stdout);
+  const stderr = outputText(result.stderr);
+  const spawnError = errorText(result.error);
   return {
-    ok: result.status === 0,
-    status: result.status,
-    stdout: result.stdout.trim(),
-    stderr: result.stderr.trim()
+    ok: result.status === 0 && !spawnError,
+    status: typeof result.status === "number" ? result.status : 1,
+    stdout: stdout.trim(),
+    stderr: [stderr, spawnError].filter(Boolean).join("\n").trim()
   };
 }
 
@@ -75,4 +82,12 @@ export function quoteShell(value) {
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function outputText(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function errorText(value) {
+  return value instanceof Error ? value.message : "";
 }
