@@ -1,82 +1,51 @@
 # AIW Handoff
 
-更新时间：2026-06-09
+更新时间：2026-06-11
 
 ## 当前活动
 
-Scratch session 管理能力已实现、验证并推送；npm `0.1.2` 发布已尝试，当前阻塞在 npm 账号/作用域权限。
+已修复 `aiw ws` 在包含坏 worktree / prunable worktree 的仓库里崩溃的问题。
 
 ## 本次已处理
 
-- 新增 scratch session 管理入口：
-  - `aiw scratch list`
-  - `aiw scratch resume`
-  - `aiw cmux scratch resume`
-- 新建 scratch session 时写入 `.aiw-session.json`，记录：
-  - 创建时间
-  - agent
-  - session id
-  - 第一条消息
-  - session path
-- `aiw scratch resume` 扫描 `paths.sessions`，用 fzf TUI 展示并搜索：
-
-```text
-时间    session id    第一条消息    路径
-```
-
-- 支持按日期、session id、第一条消息内容、路径片段模糊匹配。
-- 支持非交互直开：
+- 复现命令：
 
 ```bash
-aiw scratch resume --id <session-id>
+cd /Users/bytedance/Code/marketing-x.feat-yunti-withdraw
+node /Users/bytedance/Code/aiw/bin/aiw ws
 ```
 
-- 新增 `scratch-resume` dependency gate，要求 `cmux`、`yazi`、`nvim`、`fzf` 和目标 agent。
-- `aiw init` 现在会注册两个 scratch 相关 cmux action：
+- 根因：
+  - `wt list --format json` 会返回 prunable worktree，例如 `/Users/bytedance/Code/wt-feat/openspec-prd-test-2`。
+  - AIW 后续用 `tryCapture("git", ["status", "--short"], { cwd })` 探测 dirty 状态。
+  - 当 `cwd` 不存在时，`spawnSync` 返回启动级错误，`stdout` / `stderr` 为 `undefined`。
+  - 旧版 `tryCapture()` 直接读取 `result.stdout.trim()`，触发 `Cannot read properties of undefined (reading 'trim')`。
 
-```text
-aiw-scratch-session -> aiw cmux scratch
-aiw-scratch-resume  -> aiw cmux scratch resume
-```
-
-- 修复 `aiw init` 默认 launcher：从错误的 `npx aiw` 改为 `npx --yes @chlrc/aiw`，避免命中 npm 上另一个 `aiw@1.0.0` 包。
-- 本机真实 `~/.config/cmux/cmux.json` 已用本地 checkout launcher 重刷：
-
-```text
-node /Users/bytedance/Code/aiw/bin/aiw cmux-new
-node /Users/bytedance/Code/aiw/bin/aiw cmux-new --pick-repo
-node /Users/bytedance/Code/aiw/bin/aiw cmux-new --local
-node /Users/bytedance/Code/aiw/bin/aiw cmux scratch
-node /Users/bytedance/Code/aiw/bin/aiw cmux scratch resume
-```
-
-- `cmux reload-config` 已成功。
-- `README.md`、`README.zh-CN.md`、`skills/aiw-reference/SKILL.md`、`skills/aiw-init/SKILL.md`、`docs/2026-06-09-scratch-sessions.md` 已同步。
+- 修复：
+  - `src/run.mjs` 现在会先归一化 `spawnSync` 的 `stdout`、`stderr` 和 `error`。
+  - `tryCapture()` 对启动级错误返回 `{ ok: false, status: 1, stdout: "", stderr: "<error>" }`。
+  - `capture()` 也会把 `spawnSync` 的 `error.message` 纳入失败消息，避免同类缺失输出问题。
 
 ## 验证结果
 
-- `node bin/aiw scratch list --root /private/tmp/aiw-session-fixture --json` 通过。
-- `node bin/aiw scratch list --root /private/tmp/aiw-session-fixture` 通过。
-- `node bin/aiw scratch resume --root /private/tmp/aiw-session-fixture --id 142939-912bdf48 --agent codex --dry-run` 通过。
-- `node bin/aiw doctor --gate scratch-resume --agent codex --json` 通过。
-- `node bin/aiw init --dry-run --yes --cmux-scope home` 通过。
-- `node bin/aiw init --yes --cmux-scope home --launcher "node /Users/bytedance/Code/aiw/bin/aiw"` 通过并 reload cmux。
-- `npm run check` 通过；npm 仍输出本机 npmrc 的 `always-auth` / `email` / `home` unknown config warning，不影响检查。
-- `git diff --check` 通过。
-- `/private/tmp/aiw-session-fixture` 已清理。
+```bash
+npm run check
+node /Users/bytedance/Code/aiw/bin/aiw ws
+node /Users/bytedance/Code/aiw/bin/aiw ws list --json
+```
+
+- `npm run check` 通过。
+- 在 `/Users/bytedance/Code/marketing-x.feat-yunti-withdraw` 下，`aiw ws` 已正常输出 workspace 表。
+- `aiw ws list --json` 已正常输出 7 条 workspace 记录。
+- 本机 shell 仍会输出 `fnm_multishells ... Operation not permitted` 噪音；命令主体成功。
 
 ## 当前 Git 状态
 
-- `master` 已推送到 `origin/master`，当前 release bump 提交为 `7a22b98 chore(release): bump version to 0.1.2`；最新功能提交为 `c8c22b7 feat(scratch): add session resume picker`。
-- `package.json` 已将版本从 `0.1.1` bump 到 `0.1.2`，用于避开 npm registry 上已存在的 `0.1.1`。
-- npm registry 当前线上版本：`0.1.1`。
-- 本机 `npm whoami --registry=https://registry.npmjs.org/` 返回 `E401 Unauthorized`，发布需要先完成 npm 登录或注入有效 `NPM_TOKEN`。
-- `npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache` 已尝试，tarball 生成正常，但 registry 返回 `E404 Not Found - PUT https://registry.npmjs.org/@chlrc%2faiw`，错误文案包含 `could not be found or you do not have permission to access it`。
+- 当前分支：`master`。
+- 本次改动文件：
+  - `src/run.mjs`
+  - `HANDOFF.md`
 
 ## 后续建议
 
-- 修复 npm auth / `@chlrc` scope 发布权限后执行：
-
-```bash
-npm publish --access public --registry=https://registry.npmjs.org/ --cache /private/tmp/aiw-npm-cache
-```
+- 如需让全局 `aiw` 立即使用这次 checkout 的修复，确认 `/Users/bytedance/.local/bin/aiw` 仍指向本地 launcher；否则执行项目既有安装流程。
