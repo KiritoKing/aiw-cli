@@ -1,6 +1,6 @@
 ---
 name: aiw-init
-description: Initialize, migrate, bootstrap, configure, or troubleshoot the AIW CLI environment for a user. Use when the user asks about installing AIW, running `npx @chlrc/aiw init`, migrating AIW config, setting up tmux/cmux workstation runtime support, choosing AIW config paths, checking dependency gates, diagnosing setup failures, or answering questions about the AIW initialization flow.
+description: Initialize, bootstrap, configure, or troubleshoot the AIW CLI environment for a user. Use when the user asks about installing AIW, running `npx @chlrc/aiw init`, setting up tmux/cmux workstation runtime support, choosing AIW config paths, checking dependency gates, diagnosing setup failures, or answering questions about the AIW initialization flow.
 ---
 
 # AIW Init
@@ -11,8 +11,8 @@ Help users get AIW ready on a machine without turning setup into a blind write o
 
 ## Operating Rules
 
-- Prefer a read-only preflight first. Use `doctor`, `init --dry-run`, `migrate --dry-run`, or direct `command -v` checks before applying setup changes.
-- Treat `aiw init` and `aiw migrate` as write operations. Run them for real only when the user explicitly wants initialization or migration to proceed.
+- Prefer a read-only preflight first. Use `doctor`, `init --dry-run`, or direct `command -v` checks before applying setup changes.
+- Treat `aiw init` as a write operation. Run it for real only when the user explicitly wants initialization to proceed.
 - Do not use `--force` unless the user explicitly wants existing AIW config files overwritten.
 - Do not claim that `aiw init` installs agent skills. Current AIW init prints `[skip] skills initialization`; install skills separately with the npm `skills` CLI.
 - Keep AIW personal workflow config out of business repositories by default.
@@ -69,23 +69,6 @@ Gate behavior:
 - Missing `tmux` is blocking.
 - Missing `cmux` is recommended/warn-level.
 - A real `aiw init` run without cmux requires `--yes` or interactive confirmation to continue with tmux-only setup.
-
-## Migration Workflow
-
-Use `aiw migrate` to remove legacy `[workstation]` backend selection from an older config:
-
-```bash
-aiw migrate --dry-run
-aiw migrate --dry-run --json
-aiw migrate --yes
-```
-
-Rules:
-
-- Migration backs up `aiw.toml` before writing.
-- Existing legacy `[workstation]` is removed.
-- No legacy `[workstation]` is a no-op by default.
-- Other old fields are preserved by default for rollback.
 
 ## Setup Workflow
 
@@ -150,7 +133,6 @@ When validating cmux registration, check that the AIW actions exist rather than 
 ## Troubleshooting
 
 - If setup fails before writing files, install the missing blocking dependency and rerun the dry-run command.
-- If migration is a no-op, inspect whether legacy `[workstation]` exists.
 - If cmux config parsing fails, inspect the target JSON/JSONC file and fix invalid syntax before rerunning init.
 - If an agent command is missing, install that agent CLI or edit `~/.config/aiw/agents.toml` to point at an available command.
 - If `fnm_multishells ... Operation not permitted` appears before command output, treat it as shell startup noise when the actual AIW command succeeds.

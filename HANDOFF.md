@@ -11,7 +11,7 @@
 - 用户不再选择 backend；AIW 根据 runtime 自动选择 UI。
 - 默认所有普通终端、Ghostty、SSH、无 GUI 开发机都走 tmux。
 - 只有当前进程在 cmux runtime 内，且 `cmux` CLI 可用时，才走 cmux 命令。
-- `aiw migrate` 用于移除旧 `[workstation]` 选择配置。
+- `aiw migrate` 已删除；旧 `[workstation]` 配置不再读取。
 
 ## 当前实现边界
 
@@ -26,6 +26,10 @@ Runtime 选择：
 - scratch：Files + Agent。
 - cmux adapter 继续输出 cmux workspace JSON。
 - tmux adapter 创建 tmux session 和 panes。
+- AIW 创建或复用 tmux session 时写入 `@aiw_managed`、`@aiw_cwd`、`@aiw_kind`、`@aiw_name` 元数据。
+- workspace list 只把带 AIW 元数据的 tmux session 标记为 open，避免接管用户手工创建的 tmux session。
+- scratch list 也读取同一套 UI 元数据；scratch close 只关闭 UI，不删除 scratch 目录。
+- scratch gc --tmux 只关闭 stale、unattached、AIW-managed scratch tmux session，不删除 scratch 目录。
 
 依赖门禁：
 
@@ -40,25 +44,20 @@ Runtime 选择：
 ```bash
 npm run check
 node bin/aiw --help
-node bin/aiw migrate --dry-run --json
 node bin/aiw doctor --gate new --agent codex --json
 node bin/aiw doctor --gate layout --agent codex --json
 node bin/aiw layout --agent codex --dry-run
 node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
+node bin/aiw scratch list --root /private/tmp/aiw-sessions --json
+node bin/aiw scratch gc --tmux --root /private/tmp/aiw-sessions --dry-run
 ```
-
-迁移验证建议使用 `/private/tmp` 下的临时 config dir，覆盖：
-
-- 旧 `[workstation]` 配置 dry-run JSON。
-- 实际迁移创建 backup 并移除 `[workstation]`。
-- 没有 `[workstation]` 时默认 no-op。
 
 ## 兼容边界
 
 - `aiw cmux-new` 仍可用，但新文档和生成配置应使用 `aiw new`。
 - `aiw cmux scratch` 仍可用，但新文档和生成配置应使用 `aiw scratch`。
 - `--no-close-cmux` 仍可解析，但主选项是 `--no-close-ui`。
-- JSON workspace 记录保留旧 `cmux` 字段作为兼容信号，同时保留 `open` 和 `uiImplementation`。
+- JSON workspace 记录保留旧 `cmux` 字段作为兼容信号，同时保留 `open`、`uiImplementation` 和 `uiRef`。
 
 ## 环境注意
 

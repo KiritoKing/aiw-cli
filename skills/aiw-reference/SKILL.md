@@ -12,7 +12,7 @@ Use AIW as the orchestration layer around existing terminal tools. AIW decides t
 ## Operating Rules
 
 - Run real state checks before making lifecycle changes. Prefer `aiw doctor`, `git status --short`, and `aiw workspace list` as first evidence.
-- Treat these as high-impact operations: `aiw workspace done`, `aiw workspace remove`, `aiw workspace gc --apply`, `aiw workspace gc --yes`, and any `--force` use.
+- Treat these as high-impact operations: `aiw workspace done`, `aiw workspace remove`, `aiw workspace gc --apply`, `aiw workspace gc --yes`, `aiw scratch gc --tmux --apply`, `aiw scratch gc --tmux --yes`, and any `--force` use.
 - Use dry-run or preview modes when available before applying changes.
 - Do not run `aiw done` from the main checkout. It is only valid inside a feature worktree and refuses dirty worktrees.
 - Do not silently stage files for `aiw commit`. AIW commit reads staged changes only.
@@ -105,9 +105,13 @@ aiw scratch --agent codex
 aiw scratch notes --agent codex
 aiw scratch --message "Compare release blockers"
 aiw scratch list
+aiw scratch list --json
 aiw scratch resume
 aiw scratch resume --query "2026-06-09 release"
 aiw scratch resume --id 142939-912bdf48
+aiw scratch close 142939-912bdf48 --dry-run
+aiw scratch gc --tmux --dry-run
+aiw scratch gc --tmux --apply
 aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 ```
 
@@ -117,7 +121,7 @@ Compatibility alias:
 aiw cmux scratch --agent codex
 ```
 
-Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC.
+Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC. `scratch list` reports `open`, `uiImplementation`, and `uiRef` for AIW-managed tmux/cmux UI; `scratch close` closes the UI without deleting the scratch directory. `scratch gc --tmux` only targets stale, unattached, AIW-managed tmux scratch sessions and also leaves scratch directories intact.
 
 ## Review, Diff, and Commit
 

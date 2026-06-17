@@ -34,7 +34,6 @@ Before making non-trivial changes, read:
 - `src/cli.mjs`: top-level command dispatch.
 - `src/config.mjs`: config loading and agent resolution.
 - `src/workstation.mjs`: runtime UI detection, dependency helpers, UI open/close adapters.
-- `src/migrate.mjs`: config migration away from legacy `[workstation]`.
 - `src/deps.mjs`: dependency gates and doctor output.
 - `src/git.mjs`: Git repo, repo picker, and branch selection helpers.
 - `src/layout.mjs`: neutral project/scratch layout models plus cmux adapter.
@@ -57,7 +56,6 @@ node bin/aiw doctor
 node bin/aiw doctor --gate git
 node bin/aiw doctor --gate new --agent codex
 node bin/aiw doctor --gate layout --agent codex
-node bin/aiw migrate --dry-run --json
 node bin/aiw layout --agent codex --dry-run
 node bin/aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 ```
@@ -146,12 +144,6 @@ node bin/aiw doctor --gate scratch --agent codex
 node bin/aiw layout --agent codex --dry-run
 node bin/aiw new --repo <repo> --branch <branch> --agent codex --dry-run
 node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
-```
-
-For migration changes:
-
-```bash
-node bin/aiw migrate --dry-run --json
 ```
 
 ## Known Environment Notes

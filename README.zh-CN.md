@@ -94,7 +94,7 @@ aiw doctor --gate scratch --agent codex
 
 如果缺少 `cmux`，`doctor` 会报告 recommended missing。真实运行 `aiw init` 时，需要 `--yes` 或交互确认才能跳过 cmux。
 
-## 配置和迁移
+## 配置
 
 AIW 按以下顺序读取配置：
 
@@ -102,15 +102,7 @@ AIW 按以下顺序读取配置：
 2. 存在 `~/.config/aiw` 时使用它。
 3. 否则使用仓库内默认 [config/](./config) 目录。
 
-旧版本可能写入过 `[workstation]`。现在 runtime 会自动选择 tmux 或 cmux，这个配置段已经是 legacy：
-
-```bash
-aiw migrate --dry-run
-aiw migrate --dry-run --json
-aiw migrate --yes
-```
-
-`aiw migrate` 写入前会备份 `aiw.toml`，并移除 legacy `[workstation]`。其他旧字段默认保留，方便旧版本回滚。
+旧版本可能写入过 `[workstation]`。AIW 现在不再读取这个 section；runtime 会自动选择 tmux 或 cmux。
 
 ## 初始化
 
@@ -136,6 +128,9 @@ aiw doctor --gate new --agent codex
 aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 aiw layout --agent codex --dry-run
 aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
+aiw scratch list
+aiw scratch close smoke --dry-run
+aiw scratch gc --tmux --dry-run
 aiw workspace list
 aiw workspace open feat/foo --agent codex
 aiw workspace gc --dry-run
@@ -179,7 +174,7 @@ node bin/aiw new --repo /private/tmp/repo --branch feat/foo --agent codex --dry-
 
 AIW 按 npm `skills` CLI 可消费的 multi-skill 目录组织 skills：
 
-- [skills/aiw-init](./skills/aiw-init/SKILL.md)：初始化、迁移和排查 AIW 环境。
+- [skills/aiw-init](./skills/aiw-init/SKILL.md)：初始化和排查 AIW 环境。
 - [skills/aiw-reference](./skills/aiw-reference/SKILL.md)：执行 AIW workstation、Git、commit、done、remove 和 GC 流程。
 
 从仓库安装：
