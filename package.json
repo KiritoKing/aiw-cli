@@ -2,7 +2,7 @@
   "name": "@chlrc/aiw",
   "version": "0.1.2",
   "type": "module",
-  "description": "Personal AI workflow bridge for cmux, Worktrunk, and CLI agents.",
+  "description": "Personal AI workflow bridge for tmux/cmux workstations, Worktrunk, and CLI agents.",
   "keywords": [
     "ai",
     "cli",
@@ -34,7 +34,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "check": "node --check src/agent.mjs && node --check src/cli.mjs && node --check src/commit.mjs && node --check src/config.mjs && node --check src/deps.mjs && node --check src/git.mjs && node --check src/hooks.mjs && node --check src/init.mjs && node --check src/layout.mjs && node --check src/prompt.mjs && node --check src/run.mjs && node --check src/workspace.mjs",
+    "check": "node --check src/agent.mjs && node --check src/cli.mjs && node --check src/commit.mjs && node --check src/config.mjs && node --check src/deps.mjs && node --check src/git.mjs && node --check src/hooks.mjs && node --check src/init.mjs && node --check src/layout.mjs && node --check src/migrate.mjs && node --check src/prompt.mjs && node --check src/run.mjs && node --check src/workspace.mjs && node --check src/workstation.mjs",
     "install:global": "scripts/install-global.sh"
   },
   "engines": {

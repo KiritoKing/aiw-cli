@@ -9,7 +9,8 @@ import { assertGate, printDoctor } from "./deps.mjs";
 import { assertGitRoot, gitRoot, isDirty, resolveRepo, selectBranch } from "./git.mjs";
 import { runWorkspaceHook } from "./hooks.mjs";
 import { commandInit } from "./init.mjs";
-import { buildLayout, buildScratchLayout, scratchWorkspaceName, workspaceName } from "./layout.mjs";
+import { buildOpenPlan, openProjectWorkspace, openScratchWorkspace, printOpenPlan } from "./workstation.mjs";
+import { commandMigrate } from "./migrate.mjs";
 import { commandExists, quoteShell, runInherit, sleep } from "./run.mjs";
 import { commandWorkspace, recordWorkspaceTarget } from "./workspace.mjs";
 
@@ -30,13 +31,16 @@ export async function main(argv) {
     case "init":
       await commandInit(config, rest);
       return;
+    case "migrate":
+      await commandMigrate(config, rest);
+      return;
     case "cmux-new":
     case "new":
-      await commandCmuxNew(config, rest, command);
+      await commandNew(config, rest);
       return;
     case "cmux":
       if (normalizeCommand(rest[0] || "") === "new") {
-        await commandCmuxNew(config, rest.slice(1), "cmux-new");
+        await commandNew(config, rest.slice(1));
         return;
       }
       if (["scratch", "session"].includes(normalizeCommand(rest[0] || ""))) {
@@ -129,7 +133,7 @@ async function commandDoctor(config, argv) {
   }
 }
 
-async function commandCmuxNew(config, argv, commandName) {
+async function commandNew(config, argv) {
   const flags = parseFlags(argv);
   const branchFromArgs = flags.positionals[0] && !isKnownAgent(config, flags.positionals[0])
     ? flags.positionals[0]
@@ -163,7 +167,7 @@ async function commandCmuxNew(config, argv, commandName) {
     return;
   }
 
-  assertGate("cmux-new", config, agent);
+  assertGate("new", config, agent);
 
   if (config.behavior.warn_dirty_before_new !== false && isDirty(repo)) {
     console.warn(`[warn] ${repo} has uncommitted changes; Worktrunk will continue with the selected branch flow`);
@@ -198,10 +202,12 @@ async function commandLayout(config, argv) {
   } else {
     repo = gitRoot(cwd) || cwd;
   }
-  const layout = buildLayout(config, agent.name);
-  const layoutJson = JSON.stringify(layout);
   if (flags.printJson) {
-    console.log(JSON.stringify(layout, null, 2));
+    console.log(JSON.stringify(buildOpenPlan(config, {
+      kind: "project",
+      agentName: agent.name,
+      cwd
+    }), null, 2));
     return;
   }
   await runWorkspaceHook(config, "pre_init", {
@@ -213,20 +219,14 @@ async function commandLayout(config, argv) {
     dryRun: flags.dryRun
   });
   if (flags.dryRun) {
-    console.log(`cmux new-workspace --name ${quoteShell(workspaceName(cwd, agent.name))} --cwd ${quoteShell(cwd)} --focus true --layout ${quoteShell(layoutJson)}`);
+    await openProjectWorkspace(config, {
+      agentName: agent.name,
+      cwd,
+      dryRun: true
+    });
     return;
   }
-  await runInherit("cmux", [
-    "new-workspace",
-    "--name",
-    workspaceName(cwd, agent.name),
-    "--cwd",
-    cwd,
-    "--focus",
-    "true",
-    "--layout",
-    layoutJson
-  ]);
+  await openProjectWorkspace(config, { agentName: agent.name, cwd });
 }
 
 async function commandScratch(config, argv) {
@@ -312,24 +312,15 @@ function commandScratchList(config, argv) {
 }
 
 async function openScratchSession(config, agentName, sessionPath) {
-  const layout = buildScratchLayout(config, agentName);
-  await runInherit("cmux", [
-    "new-workspace",
-    "--name",
-    scratchWorkspaceName(sessionPath, agentName),
-    "--cwd",
-    sessionPath,
-    "--focus",
-    "true",
-    "--layout",
-    JSON.stringify(layout)
-  ]);
+  await openScratchWorkspace(config, { agentName, cwd: sessionPath });
 }
 
 function printScratchOpenCommand(config, agentName, sessionPath) {
-  const layout = buildScratchLayout(config, agentName);
-  const layoutJson = JSON.stringify(layout);
-  console.log(`cmux new-workspace --name ${quoteShell(scratchWorkspaceName(sessionPath, agentName))} --cwd ${quoteShell(sessionPath)} --focus true --layout ${quoteShell(layoutJson)}`);
+  printOpenPlan(buildOpenPlan(config, {
+    kind: "scratch",
+    agentName,
+    cwd: sessionPath
+  }));
 }
 
 async function commandDiff(config, argv) {
@@ -745,8 +736,9 @@ function printHelp() {
 
 Commands:
   init [--cmux-scope <home|code|none>] [--code-root <path>] [--worktrees-root <path>] [--sessions-root <path>] [--config-dir <path>] [--dry-run]
-  doctor [--json] [--gate <p0|init|layout|scratch|scratch-resume|cmux-new|workspace|worktrunk|diff|commit>] [--agent <name>]
-  cmux-new|new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
+  migrate [--config-dir <path>] [--dry-run] [--json] [--yes] [--force]
+  doctor [--json] [--gate <p0|init|new|layout|scratch|scratch-resume|workspace|worktrunk|diff|commit>] [--agent <name>]
+  new|cmux-new [--branch <branch>] [--base <branch>] [--agent <name>] [--repo <path>] [--pick-repo] [--create] [--local] [--dry-run]
   scratch|session|cmux scratch [id] [--agent <name>] [--root <path>] [--id <id>] [--message <text>] [--dry-run]
   scratch resume [--agent <name>] [--root <path>] [--id <id>] [--query <text>] [--dry-run]
   scratch list [--root <path>] [--json]
@@ -758,7 +750,7 @@ Commands:
   diff [--watch] [--staged] [--all]
   git | files [path] | edit <file[:line]> | grep <query> | pick | tree [depth]
 
-Main workflow commands run dependency gates before creating worktrees or opening cmux layouts.`);
+Main workflow commands run dependency gates before creating worktrees or opening workstation UI.`);
 }
 
 function normalizeCommand(command) {

@@ -49,6 +49,7 @@ export function loadConfig() {
     commit: aiw.commit || {},
     git: aiw.git || {},
     workspace: aiw.workspace || {},
+    workstation: aiw.workstation || {},
     agents: agents.agents || {}
   };
 }

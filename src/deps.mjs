@@ -1,8 +1,10 @@
 import { commandExists, commandPath } from "./run.mjs";
+import { workstationLabel, workstationRequirements } from "./workstation.mjs";
 
 const COMMON_TOOLS = [
   "git",
   "cmux",
+  "tmux",
   "wt",
   "yazi",
   "nvim",
@@ -40,6 +42,8 @@ export function gate(profile, config, agent) {
   const requirements = requirementsFor(profile, config, agent);
   const missing = [];
   const satisfied = [];
+  const missingRecommended = [];
+  const satisfiedRecommended = [];
 
   for (const requirement of requirements.commands) {
     if (commandExists(requirement)) {
@@ -58,17 +62,28 @@ export function gate(profile, config, agent) {
     }
   }
 
+  for (const requirement of requirements.recommended) {
+    if (commandExists(requirement)) {
+      satisfiedRecommended.push(requirement);
+    } else {
+      missingRecommended.push(requirement);
+    }
+  }
+
   return {
     ok: missing.length === 0,
     profile,
     satisfied,
-    missing
+    missing,
+    satisfiedRecommended,
+    missingRecommended
   };
 }
 
 export function assertGate(profile, config, agent) {
   const result = gate(profile, config, agent);
   if (result.ok) {
+    printRecommendedWarnings(result);
     return result;
   }
   const error = new Error(
@@ -94,7 +109,8 @@ export function printDoctor(config, options = {}) {
     config: {
       configDir: config.configDir,
       aiwPath: config.aiwPath,
-      agentsPath: config.agentsPath
+      agentsPath: config.agentsPath,
+      workstation: workstationLabel(config)
     }
   };
 
@@ -115,6 +131,9 @@ export function printDoctor(config, options = {}) {
         console.log(`[missing] ${item}`);
       }
     }
+    for (const item of gateResult.missingRecommended) {
+      console.log(`[recommended missing] ${item}`);
+    }
   }
 
   if (!gateResult.ok) {
@@ -127,22 +146,13 @@ export function printDoctor(config, options = {}) {
 function requirementsFor(profile, config, agent) {
   const agentCmd = agent?.cmd;
   const gitDeps = [config.defaults.git || "lazygit", ...lazygitOverlayDeps(config)];
+  const workstationDeps = workstationRequirements(profile, config, agent);
+  if (workstationDeps.commands.length > 0) {
+    return req(workstationDeps.commands, [], workstationDeps.recommended);
+  }
   switch (profile) {
     case "base":
       return req(["git"]);
-    case "init":
-      return req(["sh", "git", "cmux", "wt", "yazi", "nvim", ...gitDeps, "rg", "fzf", "bat", agentCmd].filter(Boolean));
-    case "layout":
-      return req(["git", "cmux", "yazi", "nvim", ...gitDeps, agentCmd].filter(Boolean));
-    case "scratch":
-    case "session":
-      return req(["cmux", "yazi", "nvim", agentCmd].filter(Boolean));
-    case "scratch-resume":
-    case "session-resume":
-      return req(["cmux", "yazi", "nvim", "fzf", agentCmd].filter(Boolean));
-    case "cmux-new":
-    case "new":
-      return req(["git", "wt", "cmux", "yazi", "nvim", ...gitDeps, agentCmd].filter(Boolean));
     case "worktrunk":
     case "workspace":
       return req(["git", "wt"]);
@@ -164,14 +174,20 @@ function requirementsFor(profile, config, agent) {
       return req(["git", agentCmd].filter(Boolean));
     case "p0":
     default:
-      return req(["git", "cmux", "wt", "yazi", "nvim", "lazygit", "delta", "fd", "rg", "fzf", "bat", "eza"]);
+      return req(["git", "wt", ...workstationRequirements("layout", config, agent).commands, "fd", "rg", "fzf", "bat", "eza"], [], workstationRequirements("layout", config, agent).recommended);
   }
 }
 
-function req(commands, anyOf = []) {
-  return { commands, anyOf };
+function req(commands, anyOf = [], recommended = []) {
+  return { commands, anyOf, recommended };
 }
 
 function lazygitOverlayDeps(config) {
   return config.git.lazygit_config ? ["delta"] : [];
+}
+
+function printRecommendedWarnings(result) {
+  for (const item of result.missingRecommended) {
+    console.warn(`[warn] recommended dependency missing: ${item}`);
+  }
 }
