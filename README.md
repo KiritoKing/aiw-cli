@@ -94,7 +94,7 @@ aiw doctor --gate scratch --agent codex
 
 If `cmux` is missing, `doctor` reports it as a recommended missing dependency. `aiw init` requires `--yes` or an interactive confirmation before continuing without cmux.
 
-## Config and Migration
+## Config
 
 AIW reads configuration from:
 
@@ -102,15 +102,7 @@ AIW reads configuration from:
 2. `~/.config/aiw`, when present.
 3. The repository default [config/](./config) directory.
 
-Older versions may have written a `[workstation]` section. That selection is now legacy because runtime detection chooses tmux or cmux automatically:
-
-```bash
-aiw migrate --dry-run
-aiw migrate --dry-run --json
-aiw migrate --yes
-```
-
-`aiw migrate` backs up `aiw.toml` before writing and removes the legacy `[workstation]` section. Other old fields are kept so a previous AIW version can still roll back.
+Older versions may have written a `[workstation]` section. AIW no longer reads that section; runtime detection chooses tmux or cmux automatically.
 
 ## Init
 
@@ -136,6 +128,9 @@ aiw doctor --gate new --agent codex
 aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 aiw layout --agent codex --dry-run
 aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
+aiw scratch list
+aiw scratch close smoke --dry-run
+aiw scratch gc --tmux --dry-run
 aiw workspace list
 aiw workspace open feat/foo --agent codex
 aiw workspace gc --dry-run
@@ -179,7 +174,7 @@ There is no full automated test suite yet. For risky CLI behavior, create a temp
 
 AIW ships skills in the npm `skills` CLI-compatible multi-skill layout:
 
-- [skills/aiw-init](./skills/aiw-init/SKILL.md): bootstrap, migrate, and troubleshoot AIW setup.
+- [skills/aiw-init](./skills/aiw-init/SKILL.md): bootstrap and troubleshoot AIW setup.
 - [skills/aiw-reference](./skills/aiw-reference/SKILL.md): operate AIW workstation, Git, commit, done, remove, and GC workflows.
 
 Install from this repository:

@@ -497,6 +497,7 @@ async function workspaceRemove(config, argv) {
     error.exitCode = 5;
     throw error;
   }
+  const closeTargets = hasDryRunFlag(argv) ? [] : removeWorkspaceRefs(config, repo, argv);
   for (const context of removeHookContexts(config, repo, argv)) {
     await runWorkspaceHook(config, "pre_remove", {
       ...context,
@@ -504,6 +505,9 @@ async function workspaceRemove(config, argv) {
     });
   }
   await runInherit("wt", ["remove", ...argv], { cwd: repo });
+  for (const closeTarget of closeTargets) {
+    closeWorkspaceRef(config, closeTarget);
+  }
 }
 
 async function workspaceGc(config, argv) {
@@ -584,6 +588,7 @@ export function collectWorkspaceRecords(config, repo) {
   const nonWorktreeBranches = listLocalBranches(repo).filter((branch) => !worktreeBranches.has(branch));
   return entries.map((entry) => {
     const resolvedPath = normalizePath(entry.path);
+    const ui = uiPaths.get(resolvedPath);
     const dirty = entry.dirty ?? isWorktreeDirty(resolvedPath);
     const lastChangedAt = entry.lastChangedAt || worktreeLastChangedAt(resolvedPath);
     const targetBranch = entry.branch ? stringValue(metadata.workspaces[entry.branch]?.targetBranch) : "";
@@ -606,9 +611,10 @@ export function collectWorkspaceRecords(config, repo) {
       targetSource: targetBranch ? stringValue(metadata.workspaces[entry.branch]?.targetSource) || "aiw" : "",
       targetMerged,
       mergedTargets,
-      open: uiPaths.has(resolvedPath),
-      uiImplementation: uiPaths.get(resolvedPath)?.implementation || "",
-      cmux: uiPaths.get(resolvedPath)?.implementation === "cmux",
+      open: Boolean(ui),
+      uiImplementation: ui?.implementation || "",
+      uiRef: ui?.ref || "",
+      cmux: ui?.implementation === "cmux",
       commit: entry.commit || "",
       lastChangedAt,
       ageSeconds: lastChangedAt ? Math.max(0, Math.floor((Date.now() - lastChangedAt) / 1000)) : null
@@ -1488,6 +1494,29 @@ function removeHookContexts(config, repo, argv) {
     });
   }
   return contexts;
+}
+
+function removeWorkspaceRefs(config, repo, argv) {
+  const targets = removeTargets(argv);
+  if (targets.length === 0) {
+    const workspaceRef = workspaceRefForPath(config, repo);
+    return workspaceRef ? [workspaceRef] : [];
+  }
+
+  const workspaces = collectWorkspaceRecords(config, repo);
+  const refs = [];
+  const seen = new Set();
+  for (const target of targets) {
+    const record = findWorkspace(workspaces, target);
+    const workspacePath = record?.path || gitRootIfExists(target);
+    const workspaceRef = record?.uiRef || (workspacePath ? workspaceRefForPath(config, workspacePath) : "");
+    if (!workspaceRef || seen.has(workspaceRef)) {
+      continue;
+    }
+    seen.add(workspaceRef);
+    refs.push(workspaceRef);
+  }
+  return refs;
 }
 
 function removeTargets(argv) {

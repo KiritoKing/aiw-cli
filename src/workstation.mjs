@@ -3,6 +3,11 @@ import path from "node:path";
 import { buildCmuxLayout, buildProjectLayoutModel, buildScratchLayoutModel, scratchWorkspaceName, workspaceName } from "./layout.mjs";
 import { commandExists, quoteShell, runInherit, tryCapture } from "./run.mjs";
 
+const TMUX_MANAGED_OPTION = "@aiw_managed";
+const TMUX_CWD_OPTION = "@aiw_cwd";
+const TMUX_KIND_OPTION = "@aiw_kind";
+const TMUX_NAME_OPTION = "@aiw_name";
+
 export function resolveWorkstation(config, overrides = {}) {
   if (overrides.implementation) {
     return validateWorkstation({ implementation: overrides.implementation });
@@ -107,6 +112,17 @@ export function closeWorkspaceRef(config, workspaceRef) {
   tryCapture("tmux", ["kill-session", "-t", workspaceRef]);
 }
 
+export function closeTmuxSession(session) {
+  if (!session) {
+    return { ok: false, status: 1, stdout: "", stderr: "missing tmux session" };
+  }
+  return tryCapture("tmux", ["kill-session", "-t", session]);
+}
+
+export function collectManagedTmuxSessions() {
+  return collectTmuxSessions().filter((session) => session.managed);
+}
+
 export function workstationLabel(config) {
   const workstation = resolveWorkstation(config);
   return workstation.implementation;
@@ -169,9 +185,11 @@ function buildCmuxOpenPlan({ workstation, model, name, cwd }) {
 
 function buildTmuxOpenPlan({ workstation, model, name, cwd }) {
   const session = tmuxSessionName(name);
+  const exists = tmuxSessionExists(session);
   const createCommands = model.type === "scratch"
     ? tmuxScratchCommands(session, cwd, model)
     : tmuxProjectCommands(session, cwd, model);
+  const metadataCommands = tmuxMetadataCommands(session, cwd, model.type, name);
   const attach = tmuxAttachCommand(session);
   return {
     workstation,
@@ -180,8 +198,15 @@ function buildTmuxOpenPlan({ workstation, model, name, cwd }) {
     cwd,
     model,
     session,
-    commands: [
+    exists,
+    metadataCommands,
+    attachCommand: attach,
+    commands: exists ? [
+      ...metadataCommands,
+      attach
+    ] : [
       ...createCommands,
+      ...metadataCommands,
       attach
     ]
   };
@@ -218,8 +243,10 @@ async function applyOpenPlan(plan, options = {}) {
     return;
   }
   if (plan.workstation.implementation !== "cmux" && tmuxSessionExists(plan.session)) {
-    const attach = plan.commands.at(-1);
-    await runInherit(attach.command, attach.args);
+    for (const command of plan.metadataCommands || []) {
+      await runInherit(command.command, command.args, { cwd: plan.cwd });
+    }
+    await runInherit(plan.attachCommand.command, plan.attachCommand.args, { cwd: plan.cwd });
     return;
   }
   for (const command of plan.commands) {
@@ -227,12 +254,23 @@ async function applyOpenPlan(plan, options = {}) {
   }
 }
 
-function commandPlan(command, args) {
+function commandPlan(command, args, role = "") {
   return {
     command,
     args,
+    role,
     display: `${command} ${args.map(quoteShell).join(" ")}`
   };
+}
+
+function tmuxMetadataCommands(session, cwd, kind, name) {
+  return [
+    ["mouse", "on"],
+    [TMUX_MANAGED_OPTION, "1"],
+    [TMUX_CWD_OPTION, normalizePath(cwd)],
+    [TMUX_KIND_OPTION, kind],
+    [TMUX_NAME_OPTION, name]
+  ].map(([option, value]) => commandPlan("tmux", ["set-option", "-q", "-t", session, option, value], "metadata"));
 }
 
 function tmuxSessionExists(session) {
@@ -275,20 +313,43 @@ function collectCmuxWorkspacePaths() {
 
 function collectTmuxWorkspacePaths(implementation) {
   const paths = new Map();
-  const result = tryCapture("tmux", ["list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}"]);
-  if (!result.ok || !result.stdout) {
-    return paths;
-  }
-  for (const line of result.stdout.split(/\r?\n/)) {
-    const [session, panePath] = line.split("\t");
-    if (session && panePath) {
-      paths.set(normalizePath(panePath), {
+  for (const session of collectTmuxSessions()) {
+    if (session.managed && session.cwd) {
+      paths.set(normalizePath(session.cwd), {
         implementation,
-        ref: session
+        ref: session.ref,
+        kind: session.kind,
+        name: session.name
       });
     }
   }
   return paths;
+}
+
+function collectTmuxSessions() {
+  const result = tryCapture("tmux", [
+    "list-sessions",
+    "-F",
+    `#{session_name}\t#{${TMUX_MANAGED_OPTION}}\t#{${TMUX_CWD_OPTION}}\t#{${TMUX_KIND_OPTION}}\t#{${TMUX_NAME_OPTION}}\t#{session_activity}\t#{session_attached}`
+  ]);
+  if (!result.ok || !result.stdout) {
+    return [];
+  }
+  return result.stdout.split(/\r?\n/).map((line) => {
+    const [ref, managed, cwd, kind, name, activity, attached] = line.split("\t");
+    const activitySeconds = Number(activity);
+    return {
+      implementation: "tmux",
+      ref: ref || "",
+      managed: managed === "1",
+      cwd: cwd ? normalizePath(cwd) : "",
+      kind: kind || "",
+      name: name || "",
+      activitySeconds: Number.isFinite(activitySeconds) ? activitySeconds : 0,
+      activityAt: Number.isFinite(activitySeconds) && activitySeconds > 0 ? new Date(activitySeconds * 1000).toISOString() : "",
+      attached: Number(attached) || 0
+    };
+  }).filter((session) => session.ref);
 }
 
 function cmuxWorkspaceRefForPath(workspacePath) {

@@ -21,7 +21,7 @@ mode = "modern"
 implementation = "cmux"
 ```
 
-这个 section 现在是 legacy。`aiw migrate` 会移除它，让 runtime detection 成为唯一来源。
+这个 section 现在是 legacy。AIW 不再读取它，也不再提供单独迁移命令；用户可以手工删除这段配置，但保留它也不会影响 runtime detection。
 
 ## 命令策略
 
@@ -30,7 +30,6 @@ implementation = "cmux"
 ```bash
 aiw new
 aiw scratch
-aiw migrate
 ```
 
 兼容入口保留：
@@ -61,26 +60,9 @@ aiw cmux scratch
 Adapter 由 `src/workstation.mjs` 执行：
 
 - cmux adapter：把 model 转为 cmux workspace JSON 并调用 `cmux new-workspace`。
-- tmux adapter：创建 tmux session 和 panes。
+- tmux adapter：创建 tmux session 和 panes；创建或复用 session 时写入 `@aiw_managed`、`@aiw_cwd`、`@aiw_kind`、`@aiw_name` session options。
 
 Ghostty 不再是 AIW implementation。它只是普通终端环境之一，AIW 在其中默认创建/attach tmux session。
-
-## 迁移策略
-
-`aiw migrate` 默认迁移当前加载的 config dir：
-
-```bash
-aiw migrate --dry-run
-aiw migrate --dry-run --json
-aiw migrate --yes
-```
-
-迁移规则：
-
-- 写入前备份 `aiw.toml`。
-- 存在 legacy `[workstation]` 时移除它。
-- 没有 legacy `[workstation]` 时默认 no-op。
-- 默认保留其他旧字段，例如 `behavior.open_cmux_after_new`，方便旧版本回滚。
 
 ## Init 策略
 
@@ -100,19 +82,23 @@ workspace 表格列为 `UI`。JSON 记录包含：
 
 - `open`
 - `uiImplementation`
+- `uiRef`
 
 旧字段 `cmux` 暂时保留为兼容信号。`done` 的主选项是 `--no-close-ui`，`--no-close-cmux` 仅作为兼容别名保留。
+
+tmux runtime 只把带 `@aiw_managed=1` 的 session 视为 AIW UI。这样 workspace list/gc/done/remove 可以统一管理 AIW 自己打开的 tmux session，同时避免误杀用户手工创建的普通 tmux session。
+
+scratch session 使用同一套 UI metadata。`scratch list` 暴露 `open`、`uiImplementation`、`uiRef`，`scratch close` 关闭对应 UI，但不会删除 scratch 目录或 `.aiw-session.json`。
+
+`scratch gc --tmux` 用于管理长期未使用的 tmux scratch session。它只处理 AIW-managed、`kind=scratch`、位于当前 scratch root 下、未 attach 且超过 stale 阈值的 tmux session；`--apply` / `--yes` 才会真正关闭，目录和 `.aiw-session.json` 保留。
 
 ## 验证清单
 
 ```bash
 npm run check
 node bin/aiw --help
-node bin/aiw migrate --dry-run --json
 node bin/aiw doctor --gate new --agent codex --json
 node bin/aiw doctor --gate layout --agent codex --json
 node bin/aiw layout --agent codex --dry-run
 node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
 ```
-
-迁移测试建议使用 `/private/tmp` 的临时 config dir，避免污染真实 `~/.config/aiw`。
