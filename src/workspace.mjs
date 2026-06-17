@@ -6,6 +6,7 @@ import { assertGitRoot, isDirty } from "./git.mjs";
 import { runWorkspaceHook } from "./hooks.mjs";
 import { askInput, pickFromList } from "./prompt.mjs";
 import { quoteShell, runInherit, tryCapture } from "./run.mjs";
+import { closeWorkspaceRef, collectOpenWorkspacePaths, workspaceRefForPath } from "./workstation.mjs";
 
 const DEFAULT_STALE_SECONDS = 7 * 24 * 60 * 60;
 const INTEGRATED_STATES = new Set(["integrated", "same_commit", "empty"]);
@@ -83,7 +84,7 @@ function workspaceList(config, argv) {
   assertGate("workspace", config);
   const flags = parseWorkspaceFlags(argv);
   const repo = assertGitRoot(process.cwd());
-  const workspaces = collectWorkspaceRecords(repo);
+  const workspaces = collectWorkspaceRecords(config, repo);
   if (flags.json) {
     console.log(JSON.stringify(workspaces, null, 2));
     return;
@@ -106,8 +107,8 @@ async function workspaceOpen(config, argv) {
 
   if (!selected) {
     if (process.stdin.isTTY) {
-      const pickedTarget = await selectWorkspaceOpenTarget(repo, flags);
-      await openWorkspaceTarget(repo, pickedTarget, flags, agent, layoutCommand);
+      const pickedTarget = await selectWorkspaceOpenTarget(config, repo, flags);
+      await openWorkspaceTarget(config, repo, pickedTarget, flags, agent, layoutCommand);
       return;
     }
     const wtArgs = pickerSwitchArgs(flags, layoutCommand);
@@ -119,11 +120,11 @@ async function workspaceOpen(config, argv) {
     return;
   }
 
-  await openWorkspaceTarget(repo, selected, flags, agent, layoutCommand);
+  await openWorkspaceTarget(config, repo, selected, flags, agent, layoutCommand);
 }
 
-async function openWorkspaceTarget(repo, selected, flags, agent, layoutCommand) {
-  const workspaces = collectWorkspaceRecords(repo);
+async function openWorkspaceTarget(config, repo, selected, flags, agent, layoutCommand) {
+  const workspaces = collectWorkspaceRecords(config, repo);
   const record = findWorkspace(workspaces, selected);
 
   if (record?.branch) {
@@ -163,8 +164,8 @@ async function openWorkspaceTarget(repo, selected, flags, agent, layoutCommand) 
   throw error;
 }
 
-async function selectWorkspaceOpenTarget(repo, flags) {
-  const workspaces = collectWorkspaceRecords(repo);
+async function selectWorkspaceOpenTarget(config, repo, flags) {
+  const workspaces = collectWorkspaceRecords(config, repo);
   const localBranches = listLocalBranches(repo);
   const worktreeBranches = new Set(workspaces.map((workspace) => workspace.branch).filter(Boolean));
   const entries = workspacePickerEntries(workspaces);
@@ -214,10 +215,10 @@ function workspacePickerEntries(workspaces) {
     const branch = workspace.branch || "(detached)";
     const gitState = workspace.dirty ? "dirty" : "clean";
     const state = stateLabel(workspace.state);
-    const cmux = workspace.cmux ? "open" : "-";
+    const ui = workspace.open ? workspace.uiImplementation || "open" : "-";
     const mark = workspace.current ? "@" : workspace.previous ? "-" : " ";
     return {
-      label: `${mark} ${branch.padEnd(branchWidth)}  ${gitState.padEnd(5)}  ${state.padEnd(8)}  ${cmux.padEnd(4)}  ${workspace.path}`,
+      label: `${mark} ${branch.padEnd(branchWidth)}  ${gitState.padEnd(5)}  ${state.padEnd(8)}  ${ui.padEnd(6)}  ${workspace.path}`,
       target: workspace.branch || workspace.path,
       current: workspace.current,
       previous: workspace.previous
@@ -249,13 +250,13 @@ async function workspaceDone(config, argv) {
   }
   const flags = parseDoneFlags(argv);
   const repo = assertGitRoot(process.cwd());
-  assertDoneAllowed(repo);
+  assertDoneAllowed(config, repo);
   if (isDirty(repo)) {
     const error = new Error("working tree has uncommitted changes; use aiw git before aiw workspace done");
     error.exitCode = 5;
     throw error;
   }
-  const closeTarget = flags.closeCmux ? cmuxWorkspaceRefForPath(repo) : "";
+  const closeTarget = flags.closeUi ? workspaceRefForPath(config, repo) : "";
   const mergeArgs = await withSelectedMergeTarget(repo, flags.passthrough);
   const target = mergeTarget(mergeArgs) || defaultDoneTarget(repo);
   assertTargetWorktreeClean(repo, target);
@@ -271,7 +272,7 @@ async function workspaceDone(config, argv) {
   });
   await runMergeWithRetry(repo, mergeArgs, retries, restorePlan, mergeEnv);
   if (closeTarget) {
-    closeCmuxWorkspace(closeTarget);
+    closeWorkspaceRef(config, closeTarget);
   }
 }
 
@@ -490,13 +491,13 @@ async function workspaceRemove(config, argv) {
     return;
   }
   const repo = assertGitRoot(process.cwd());
-  const dirtyTargets = hasForceFlag(argv) ? [] : dirtyRemoveTargets(repo, argv);
+  const dirtyTargets = hasForceFlag(argv) ? [] : dirtyRemoveTargets(config, repo, argv);
   if (dirtyTargets.length > 0) {
     const error = new Error(`workspace has uncommitted changes: ${dirtyTargets.join(", ")}; rerun with --force only if you intend to discard/remove`);
     error.exitCode = 5;
     throw error;
   }
-  for (const context of removeHookContexts(repo, argv)) {
+  for (const context of removeHookContexts(config, repo, argv)) {
     await runWorkspaceHook(config, "pre_remove", {
       ...context,
       dryRun: hasDryRunFlag(argv)
@@ -516,7 +517,7 @@ async function workspaceGc(config, argv) {
 
   const repo = assertGitRoot(process.cwd());
   const staleSeconds = staleSecondsFromFlags(flags, config);
-  const workspaces = collectWorkspaceRecords(repo);
+  const workspaces = collectWorkspaceRecords(config, repo);
   const plan = buildGcPlan(workspaces, {
     staleSeconds
   });
@@ -556,7 +557,7 @@ async function workspaceGc(config, argv) {
     return;
   }
 
-  const refreshedPlan = buildGcPlan(collectWorkspaceRecords(repo), {
+  const refreshedPlan = buildGcPlan(collectWorkspaceRecords(config, repo), {
     staleSeconds
   });
   const result = await applyGcPlan(config, repo, refreshedPlan);
@@ -575,8 +576,8 @@ async function workspaceGc(config, argv) {
   console.log(`Removed ${result.removed.length} workspace(s): ${result.removed.join(", ")}`);
 }
 
-export function collectWorkspaceRecords(repo) {
-  const cmuxPaths = collectCmuxWorkspacePaths();
+export function collectWorkspaceRecords(config, repo) {
+  const uiPaths = collectOpenWorkspacePaths(config);
   const entries = readWorktrunkList(repo) || readGitWorktreeList(repo);
   const metadata = readWorkspaceMetadata(repo);
   const worktreeBranches = new Set(entries.map((entry) => entry.branch).filter(Boolean));
@@ -605,7 +606,9 @@ export function collectWorkspaceRecords(repo) {
       targetSource: targetBranch ? stringValue(metadata.workspaces[entry.branch]?.targetSource) || "aiw" : "",
       targetMerged,
       mergedTargets,
-      cmux: cmuxPaths.has(resolvedPath),
+      open: uiPaths.has(resolvedPath),
+      uiImplementation: uiPaths.get(resolvedPath)?.implementation || "",
+      cmux: uiPaths.get(resolvedPath)?.implementation === "cmux",
       commit: entry.commit || "",
       lastChangedAt,
       ageSeconds: lastChangedAt ? Math.max(0, Math.floor((Date.now() - lastChangedAt) / 1000)) : null
@@ -680,53 +683,8 @@ function parseWorktreeBlock(block, current) {
   return entry;
 }
 
-function collectCmuxWorkspacePaths() {
-  const paths = new Set();
-  const result = tryCapture("cmux", ["list-workspaces", "--json"]);
-  if (!result.ok || !result.stdout) {
-    return paths;
-  }
-  try {
-    const parsed = JSON.parse(result.stdout);
-    const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
-    for (const workspace of workspaces) {
-      if (workspace.current_directory) {
-        paths.add(normalizePath(workspace.current_directory));
-      }
-    }
-  } catch {
-    return paths;
-  }
-  return paths;
-}
-
-function cmuxWorkspaceRefForPath(workspacePath) {
-  const targetPath = normalizePath(workspacePath);
-  const result = tryCapture("cmux", ["list-workspaces", "--json"]);
-  if (!result.ok || !result.stdout) {
-    return "";
-  }
-  try {
-    const parsed = JSON.parse(result.stdout);
-    const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
-    const match = workspaces.find((workspace) => {
-      return workspace.current_directory && normalizePath(workspace.current_directory) === targetPath;
-    });
-    return stringValue(match?.ref);
-  } catch {
-    return "";
-  }
-}
-
-function closeCmuxWorkspace(workspaceRef) {
-  if (!workspaceRef) {
-    return;
-  }
-  tryCapture("cmux", ["close-workspace", "--workspace", workspaceRef]);
-}
-
-function assertDoneAllowed(repo) {
-  const current = currentWorkspaceRecord(repo);
+function assertDoneAllowed(config, repo) {
+  const current = currentWorkspaceRecord(config, repo);
   if (current?.state === "is_main" || isPrimaryWorktree(repo)) {
     const error = new Error("aiw workspace done must be run from a feature worktree, not the main workspace");
     error.exitCode = 5;
@@ -734,9 +692,9 @@ function assertDoneAllowed(repo) {
   }
 }
 
-function currentWorkspaceRecord(repo) {
+function currentWorkspaceRecord(config, repo) {
   const currentPath = normalizePath(repo);
-  return collectWorkspaceRecords(repo).find((workspace) => {
+  return collectWorkspaceRecords(config, repo).find((workspace) => {
     return workspace.current || workspace.path === currentPath;
   });
 }
@@ -782,7 +740,7 @@ function formatWorkspaceTable(workspaces, options = {}) {
       state: stateLabel(workspace.state),
       target: targetLabel(workspace),
       merged: mergedLabel(workspace),
-      cmux: workspace.cmux ? "open" : "-",
+      ui: workspace.open ? workspace.uiImplementation || "open" : "-",
       age: formatAge(workspace.ageSeconds),
       gc: gcLabel(signals.get(workspace.path) || enrichWorkspaceSignals(workspace, plan.staleSeconds).gc),
       path: workspace.path
@@ -795,7 +753,7 @@ function formatWorkspaceTable(workspaces, options = {}) {
     ["STATE", "state"],
     ["TARGET", "target"],
     ["MERGED", "merged"],
-    ["CMUX", "cmux"],
+    ["UI", "ui"],
     ["AGE", "age"],
     ["GC", "gc"],
     ["PATH", "path"]
@@ -1116,9 +1074,9 @@ async function applyGcPlan(config, repo, plan) {
       continue;
     }
     removed.push(target);
-    const workspaceRef = cmuxWorkspaceRefForPath(workspace.path);
+    const workspaceRef = workspaceRefForPath(config, workspace.path);
     if (workspaceRef) {
-      closeCmuxWorkspace(workspaceRef);
+      closeWorkspaceRef(config, workspaceRef);
     }
   }
   return {
@@ -1185,13 +1143,13 @@ function formatAge(ageSeconds) {
 
 function formatWorkspaceSummary(workspaces, plan, painter) {
   const dirty = workspaces.filter((workspace) => workspace.dirty).length;
-  const open = workspaces.filter((workspace) => workspace.cmux).length;
+  const open = workspaces.filter((workspace) => workspace.open).length;
   const gc = plan.removable.length;
   const stale = plan.warnings.length;
   return [
     painter.bold(`Workspaces: ${workspaces.length}`),
     `dirty ${dirty > 0 ? painter.red(String(dirty)) : painter.green("0")}`,
-    `cmux open ${open > 0 ? painter.green(String(open)) : "0"}`,
+    `ui open ${open > 0 ? painter.green(String(open)) : "0"}`,
     `removable ${gc > 0 ? painter.green(String(gc)) : "0"}`,
     `stale warnings ${stale > 0 ? painter.yellow(String(stale)) : "0"}`
   ].join("  ");
@@ -1228,8 +1186,8 @@ function colorWorkspaceCell(key, value, workspace, painter) {
     }
     return value.trim() === "-" ? painter.dim(value) : painter.red(value);
   }
-  if (key === "cmux") {
-    return workspace.cmux ? painter.green(value) : painter.dim(value);
+  if (key === "ui") {
+    return workspace.open ? painter.green(value) : painter.dim(value);
   }
   if (key === "gc") {
     if (workspace.gc?.removable) {
@@ -1480,13 +1438,13 @@ function defaultRemoteBranch(repo) {
   return result.stdout.startsWith("origin/") ? result.stdout.slice("origin/".length) : result.stdout;
 }
 
-function dirtyRemoveTargets(repo, argv) {
+function dirtyRemoveTargets(config, repo, argv) {
   const targets = removeTargets(argv);
   if (targets.length === 0) {
     return isDirty(repo) ? [repo] : [];
   }
 
-  const workspaces = collectWorkspaceRecords(repo);
+  const workspaces = collectWorkspaceRecords(config, repo);
   const dirtyPaths = [];
   for (const target of targets) {
     const record = findWorkspace(workspaces, target);
@@ -1498,7 +1456,7 @@ function dirtyRemoveTargets(repo, argv) {
   return [...new Set(dirtyPaths)];
 }
 
-function removeHookContexts(repo, argv) {
+function removeHookContexts(config, repo, argv) {
   const targets = removeTargets(argv);
   if (targets.length === 0) {
     return [{
@@ -1510,7 +1468,7 @@ function removeHookContexts(repo, argv) {
     }];
   }
 
-  const workspaces = collectWorkspaceRecords(repo);
+  const workspaces = collectWorkspaceRecords(config, repo);
   const contexts = [];
   const seen = new Set();
   for (const target of targets) {
@@ -1650,11 +1608,13 @@ function parseWorkspaceFlags(argv) {
       case "-y":
         flags.yes = true;
         break;
+      case "--no-close-ui":
       case "--no-close-cmux":
-        flags.closeCmux = false;
+        flags.closeUi = false;
         break;
+      case "--close-ui":
       case "--close-cmux":
-        flags.closeCmux = true;
+        flags.closeUi = true;
         break;
       case "--branches":
         flags.branches = true;
@@ -1682,17 +1642,17 @@ function parseWorkspaceFlags(argv) {
 
 function parseDoneFlags(argv) {
   const flags = {
-    closeCmux: true,
+    closeUi: true,
     agent: "",
     retries: undefined,
     passthrough: []
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--no-close-cmux") {
-      flags.closeCmux = false;
-    } else if (arg === "--close-cmux") {
-      flags.closeCmux = true;
+    if (arg === "--no-close-ui" || arg === "--no-close-cmux") {
+      flags.closeUi = false;
+    } else if (arg === "--close-ui" || arg === "--close-cmux") {
+      flags.closeUi = true;
     } else if (arg === "--agent") {
       flags.agent = argv[++index] || "";
     } else if (arg.startsWith("--agent=")) {
@@ -1748,12 +1708,12 @@ function printWorkspaceHelp() {
 
 Commands:
   list [--json] [--color mode] [--stale-seconds n]
-                                               List worktrees with dirty, age, GC, and cmux status
+                                               List worktrees with dirty, age, GC, and UI status
   status [--json]                             Alias for list
-  open [target] [--agent name] [--remotes]    Open picker or target with the AIW cmux layout
+  open [target] [--agent name] [--remotes]    Open picker or target with the AIW workstation layout
   switch [target]                             Alias for open
-  done [target] [--agent name] [--retries n] [--no-close-cmux]
-                                               Merge the current feature worktree, cleanup, then close cmux workspace
+  done [target] [--agent name] [--retries n] [--no-close-ui]
+                                               Merge the current feature worktree, cleanup, then close workstation UI
   remove [wt-remove-args...]                  Remove worktrees after dirty check
   gc|clean [--dry-run] [--apply|--yes] [--json] [--stale-seconds n]
                                                Preview or remove safe worktrees; stale warnings are not removed

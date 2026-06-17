@@ -1,51 +1,66 @@
 # AIW Handoff
 
-更新时间：2026-06-11
+更新时间：2026-06-17
 
 ## 当前活动
 
-已修复 `aiw ws` 在包含坏 worktree / prunable worktree 的仓库里崩溃的问题。
+正在把 AIW workstation runtime 收敛为自动判断：
 
-## 本次已处理
+- 主入口仍是 `aiw new`。
+- `cmux-new` 和 `aiw cmux scratch` 保留为兼容别名。
+- 用户不再选择 backend；AIW 根据 runtime 自动选择 UI。
+- 默认所有普通终端、Ghostty、SSH、无 GUI 开发机都走 tmux。
+- 只有当前进程在 cmux runtime 内，且 `cmux` CLI 可用时，才走 cmux 命令。
+- `aiw migrate` 用于移除旧 `[workstation]` 选择配置。
 
-- 复现命令：
+## 当前实现边界
 
-```bash
-cd /Users/bytedance/Code/marketing-x.feat-yunti-withdraw
-node /Users/bytedance/Code/aiw/bin/aiw ws
-```
+Runtime 选择：
 
-- 根因：
-  - `wt list --format json` 会返回 prunable worktree，例如 `/Users/bytedance/Code/wt-feat/openspec-prd-test-2`。
-  - AIW 后续用 `tryCapture("git", ["status", "--short"], { cwd })` 探测 dirty 状态。
-  - 当 `cwd` 不存在时，`spawnSync` 返回启动级错误，`stdout` / `stderr` 为 `undefined`。
-  - 旧版 `tryCapture()` 直接读取 `result.stdout.trim()`，触发 `Cannot read properties of undefined (reading 'trim')`。
+- `tmux`：必需依赖，默认 workstation runtime。
+- `cmux`：推荐依赖，只在 cmux runtime 内使用。
 
-- 修复：
-  - `src/run.mjs` 现在会先归一化 `spawnSync` 的 `stdout`、`stderr` 和 `error`。
-  - `tryCapture()` 对启动级错误返回 `{ ok: false, status: 1, stdout: "", stderr: "<error>" }`。
-  - `capture()` 也会把 `spawnSync` 的 `error.message` 纳入失败消息，避免同类缺失输出问题。
+布局模型：
 
-## 验证结果
+- project：顶部 Files + Agent，底部 Git。
+- scratch：Files + Agent。
+- cmux adapter 继续输出 cmux workspace JSON。
+- tmux adapter 创建 tmux session 和 panes。
+
+依赖门禁：
+
+- `doctor --gate new/layout/scratch` 必须要求 `tmux`。
+- `cmux` 只作为 recommended missing 输出。
+- `aiw init` 在真实写入时，如果缺少 cmux，需要 `--yes` 或交互确认才能跳过。
+
+## 待验证命令
+
+代码改动后至少验证：
 
 ```bash
 npm run check
-node /Users/bytedance/Code/aiw/bin/aiw ws
-node /Users/bytedance/Code/aiw/bin/aiw ws list --json
+node bin/aiw --help
+node bin/aiw migrate --dry-run --json
+node bin/aiw doctor --gate new --agent codex --json
+node bin/aiw doctor --gate layout --agent codex --json
+node bin/aiw layout --agent codex --dry-run
+node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
 ```
 
-- `npm run check` 通过。
-- 在 `/Users/bytedance/Code/marketing-x.feat-yunti-withdraw` 下，`aiw ws` 已正常输出 workspace 表。
-- `aiw ws list --json` 已正常输出 7 条 workspace 记录。
-- 本机 shell 仍会输出 `fnm_multishells ... Operation not permitted` 噪音；命令主体成功。
+迁移验证建议使用 `/private/tmp` 下的临时 config dir，覆盖：
 
-## 当前 Git 状态
+- 旧 `[workstation]` 配置 dry-run JSON。
+- 实际迁移创建 backup 并移除 `[workstation]`。
+- 没有 `[workstation]` 时默认 no-op。
 
-- 当前分支：`master`。
-- 本次改动文件：
-  - `src/run.mjs`
-  - `HANDOFF.md`
+## 兼容边界
 
-## 后续建议
+- `aiw cmux-new` 仍可用，但新文档和生成配置应使用 `aiw new`。
+- `aiw cmux scratch` 仍可用，但新文档和生成配置应使用 `aiw scratch`。
+- `--no-close-cmux` 仍可解析，但主选项是 `--no-close-ui`。
+- JSON workspace 记录保留旧 `cmux` 字段作为兼容信号，同时保留 `open` 和 `uiImplementation`。
 
-- 如需让全局 `aiw` 立即使用这次 checkout 的修复，确认 `/Users/bytedance/.local/bin/aiw` 仍指向本地 launcher；否则执行项目既有安装流程。
+## 环境注意
+
+- 本机 shell 可能输出 `fnm_multishells ... Operation not permitted` 噪音；命令主体成功时忽略。
+- 历史 dated docs 保留旧 cmux-first 叙事作为历史记录，不要为了本次重构改写旧日志。

@@ -8,9 +8,10 @@ This file applies to the entire `aiw` workspace.
 
 `aiw` is a personal AI programming workflow CLI. It is intentionally a thin orchestration layer:
 
-- `aiw` owns workflow decisions, config loading, dependency gates, prompts, and command routing.
+- `aiw` owns workflow decisions, config loading, dependency gates, prompts, command routing, and workstation layout plans.
 - Worktrunk owns worktree lifecycle.
-- cmux owns workspaces and panes.
+- tmux owns the default workstation panes in all normal terminals.
+- cmux owns panes only when AIW is running inside cmux and the `cmux` CLI is available.
 - lazygit owns Git TUI operations.
 - delta owns diff rendering.
 - agent CLIs own model interaction.
@@ -23,18 +24,20 @@ Do not turn `aiw` into a terminal emulator, Git client, editor, diff viewer, dae
 Before making non-trivial changes, read:
 
 - `README.md` for command behavior.
-- `docs/2026-05-29-design.md` for product boundaries.
+- `docs/2026-05-29-design.md` for historical product boundaries.
 - `HANDOFF.md` for current progress and known gaps.
-- `docs/2026-06-01-workflow-handoff.md` for the latest detailed handoff.
+- `docs/2026-06-12-workstation-backend-migration.md` for the current workstation runtime model.
 
 ## Repository Layout
 
 - `bin/aiw`: executable entrypoint.
 - `src/cli.mjs`: top-level command dispatch.
 - `src/config.mjs`: config loading and agent resolution.
+- `src/workstation.mjs`: runtime UI detection, dependency helpers, UI open/close adapters.
+- `src/migrate.mjs`: config migration away from legacy `[workstation]`.
 - `src/deps.mjs`: dependency gates and doctor output.
 - `src/git.mjs`: Git repo, repo picker, and branch selection helpers.
-- `src/layout.mjs`: cmux layout generation.
+- `src/layout.mjs`: neutral project/scratch layout models plus cmux adapter.
 - `src/commit.mjs`: AI commit workflow.
 - `src/agent.mjs`: agent invocation and output cleanup.
 - `src/run.mjs`: process execution helpers.
@@ -52,9 +55,11 @@ Use the checked-out CLI while developing:
 node bin/aiw --help
 node bin/aiw doctor
 node bin/aiw doctor --gate git
-node bin/aiw doctor --gate cmux-new --agent codex
+node bin/aiw doctor --gate new --agent codex
+node bin/aiw doctor --gate layout --agent codex
+node bin/aiw migrate --dry-run --json
 node bin/aiw layout --agent codex --dry-run
-node bin/aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
+node bin/aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
 ```
 
 Run this after code changes:
@@ -82,15 +87,16 @@ There is no full automated test suite yet. For risky CLI behavior, create a temp
 
 Preserve these constraints:
 
-- `cmux-new` and `layout` must pass dependency gates before creating worktrees or opening workspaces.
+- `new` and `layout` must pass the workstation dependency gate before creating worktrees or opening UI.
+- `cmux-new` remains a compatibility alias; do not make it the primary command in new docs or generated config.
 - `aiw commit` expects staged changes and should not silently stage files for the user.
 - Commit generation must read staged diff, support custom prompt injection, commit via `git commit -F -`, and retry hook failures according to config.
 - `aiw git` should load the AIW lazygit overlay by default, but direct `lazygit` should remain untouched.
-- The right-bottom diff pane currently uses `cmux-git-diff` when available, otherwise `git diff | delta`; do not describe it as cmux built-in diff unless that becomes true.
+- `aiw diff` may use `cmux-git-diff` when installed, otherwise `git diff | delta`; do not describe it as a built-in diff viewer.
 
 ## cmux Safety
 
-Be careful with cmux customization.
+cmux is optional runtime integration. AIW should run through tmux outside cmux, and should call cmux commands only from a cmux runtime.
 
 - Do not edit a user's existing `<code-root>/.cmux/cmux.json` unless the user explicitly asks for that exact change.
 - A previous attempt to inject AIW into cmux config broke the user's existing cmux reload behavior and was rolled back.
@@ -131,12 +137,21 @@ node bin/aiw doctor --gate commit --agent codex
 
 Also verify with a temporary Git repo and staged changes when changing `src/commit.mjs`.
 
-For cmux/worktree changes:
+For workstation/worktree changes:
 
 ```bash
-node bin/aiw doctor --gate cmux-new --agent codex
+node bin/aiw doctor --gate new --agent codex
+node bin/aiw doctor --gate layout --agent codex
+node bin/aiw doctor --gate scratch --agent codex
 node bin/aiw layout --agent codex --dry-run
-node bin/aiw cmux-new --repo <repo> --branch <branch> --agent codex --dry-run
+node bin/aiw new --repo <repo> --branch <branch> --agent codex --dry-run
+node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
+```
+
+For migration changes:
+
+```bash
+node bin/aiw migrate --dry-run --json
 ```
 
 ## Known Environment Notes
@@ -144,6 +159,7 @@ node bin/aiw cmux-new --repo <repo> --branch <branch> --agent codex --dry-run
 - Do not assume every checkout has a remote configured; inspect Git state before push or release work.
 - `fd` may be missing locally, which affects `aiw pick`.
 - `cmux-git-diff` may be missing locally; `aiw diff` should fall back to delta.
+- `cmux` is recommended but not required for normal tmux workstation use.
 - `aider` may be missing; this only affects selecting the aider agent.
 - Shell output may include `fnm_multishells ... Operation not permitted`; ignore it if the actual command succeeded.
 

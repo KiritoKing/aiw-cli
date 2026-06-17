@@ -1,22 +1,22 @@
 ---
 name: aiw-reference
-description: Operate the AIW CLI directly for workspace automation, scratch sessions, Git review, diff inspection, AI commits, cmux layout launching, Worktrunk worktree lifecycle, workspace garbage collection, and finishing feature branches. Use when the user asks an agent to run AIW commands, clean workspaces, merge back to a target branch, open or create AIW workspaces, start non-project AI sessions, automate AIW flows, or explain AIW command behavior.
+description: Operate the AIW CLI directly for workstation automation, scratch sessions, Git review, diff inspection, AI commits, Worktrunk worktree lifecycle, workspace garbage collection, and finishing feature branches. Use when the user asks an agent to run AIW commands, clean workspaces, merge back to a target branch, open or create AIW workstations, start non-project AI sessions, automate AIW flows, or explain AIW command behavior.
 ---
 
 # AIW Reference
 
 ## Purpose
 
-Use AIW as the orchestration layer around existing terminal tools. AIW decides the workflow path, runs dependency gates, and delegates to Worktrunk, cmux, lazygit, delta, yazi, nvim, Git, and agent CLIs.
+Use AIW as the orchestration layer around existing terminal tools. AIW decides the workflow path, runs dependency gates, and delegates to Worktrunk, the runtime workstation UI, lazygit, delta, yazi, nvim, Git, and agent CLIs.
 
 ## Operating Rules
 
-- Run real state checks before making lifecycle changes. Prefer `aiw doctor`, `git status --short`, and `aiw workspace list` as the first evidence.
+- Run real state checks before making lifecycle changes. Prefer `aiw doctor`, `git status --short`, and `aiw workspace list` as first evidence.
 - Treat these as high-impact operations: `aiw workspace done`, `aiw workspace remove`, `aiw workspace gc --apply`, `aiw workspace gc --yes`, and any `--force` use.
-- Use dry-run or preview modes when available before applying changes. `gc --dry-run` is the default safe way to inspect cleanup.
+- Use dry-run or preview modes when available before applying changes.
 - Do not run `aiw done` from the main checkout. It is only valid inside a feature worktree and refuses dirty worktrees.
-- Do not silently stage files for `aiw commit`. AIW commit reads staged changes only; the user or agent must intentionally stage changes first.
-- Use `aiw cmux scratch` or the short alias `aiw scratch` for non-project sessions. Scratch sessions are not Worktrunk worktrees and should not be finished with `aiw done`.
+- Do not silently stage files for `aiw commit`. AIW commit reads staged changes only.
+- Use `aiw scratch` for non-project sessions. Scratch sessions are not Worktrunk worktrees and should not be finished with `aiw done`.
 - Keep personal AIW workflow files out of business repositories unless the user explicitly asks for project-local config.
 
 ## Resolve the AIW Command
@@ -46,6 +46,7 @@ Start with the smallest useful checks:
 ```bash
 aiw doctor
 aiw doctor --gate workspace
+aiw doctor --gate new --agent codex
 git status --short
 aiw workspace list
 aiw ls
@@ -54,19 +55,30 @@ aiw workspace list --json
 aiw workspace states
 ```
 
-Use `--json` when automating decisions. The workspace table combines Worktrunk, Git, cmux, target-branch, merge-state, age, dirty, and GC signals.
+Use `--json` when automating decisions. The workspace table combines Worktrunk, Git, workstation UI, target-branch, merge-state, age, dirty, and GC signals. Prefer `open` and `uiImplementation` in JSON; `cmux` is retained only as a compatibility field.
 
-## Open or Create Workspaces
+Runtime behavior:
 
-Create or switch to a worktree and open the standard three-pane cmux layout:
+- tmux is required and is the default UI in normal terminals, Ghostty, SSH, and no-GUI machines.
+- cmux is optional and used only when AIW is running inside cmux and the `cmux` CLI is available.
+
+## Open or Create Workstations
+
+Create or switch to a worktree and open the runtime workstation:
+
+```bash
+aiw new --agent codex
+aiw new --pick-repo --agent codex
+aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
+aiw new --repo ~/Code/my-repo --branch feat/foo --base main --agent codex --dry-run
+aiw new --local --agent codex
+```
+
+Compatibility aliases still work for old scripts:
 
 ```bash
 aiw cmux-new --agent codex
-aiw new --agent codex
 aiw cmux-new --pick-repo --agent codex
-aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
-aiw cmux-new --repo ~/Code/my-repo --branch feat/foo --base main --agent codex --dry-run
-aiw cmux-new --local --agent codex
 ```
 
 Behavior:
@@ -90,7 +102,6 @@ Create a non-project AIW session under `paths.sessions`, defaulting to `~/Docume
 
 ```bash
 aiw scratch --agent codex
-aiw cmux scratch --agent codex
 aiw scratch notes --agent codex
 aiw scratch --message "Compare release blockers"
 aiw scratch list
@@ -100,7 +111,13 @@ aiw scratch resume --id 142939-912bdf48
 aiw session --root /private/tmp/aiw-sessions --id smoke --agent codex --dry-run
 ```
 
-Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC. New scratch sessions write `.aiw-session.json`; resume uses fzf over time, ID, first message, and path so dates and content are both searchable.
+Compatibility alias:
+
+```bash
+aiw cmux scratch --agent codex
+```
+
+Scratch sessions open Files and Agent panes only. They do not require a Git repository, do not call Worktrunk, and do not participate in workspace GC.
 
 ## Review, Diff, and Commit
 
@@ -135,10 +152,10 @@ Use this flow when the user asks to merge a feature workspace back to a target b
 ```bash
 git status --short
 aiw workspace list
-aiw workspace done dev --no-close-cmux
-aiw workspace done dev --agent codex --no-close-cmux
-aiw workspace done dev --retries 3 --no-close-cmux
-aiw workspace done dev --agent codex --retries 3 --no-close-cmux
+aiw workspace done dev --no-close-ui
+aiw workspace done dev --agent codex --no-close-ui
+aiw workspace done dev --retries 3 --no-close-ui
+aiw workspace done dev --agent codex --retries 3 --no-close-ui
 ```
 
 Rules:
@@ -148,8 +165,7 @@ Rules:
 - `done` defaults retries from `commit.retries` and restores the source worktree, target branch, and Worktrunk backup ref after failed merge attempts.
 - Pass an explicit target such as `dev`, `main`, or `master` when the recorded AIW target is unclear.
 - Use `--agent <name>` when the Worktrunk squash commit message should be generated by a specific AIW agent.
-- If a Worktrunk squash commit fails commitlint with a fallback subject like `Squash commits from ...`, inspect `git status --short`; if the index now contains the squashed changes, create a valid Conventional Commit manually or restore from `refs/wt-backup/<branch>` before retrying.
-- Omit `--no-close-cmux` when the user wants the matching cmux workspace closed after a successful Worktrunk merge.
+- `--no-close-cmux` remains available only as a compatibility alias.
 
 Short alias:
 
@@ -209,7 +225,7 @@ For agent-run automation, report the exact evidence and command sequence:
 
 1. Show the current repo/worktree state.
 2. Show the AIW preview or dry-run output when available.
-3. State which operation is about to mutate worktrees, commits, or cmux.
+3. State which operation is about to mutate worktrees, commits, or UI.
 4. Run the apply command only when the user has authorized that operation.
 5. Verify with `aiw workspace list`, `git status --short`, or the relevant `doctor` gate.
 

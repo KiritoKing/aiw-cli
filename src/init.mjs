@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { expandHome, projectRoot, resolveAgent } from "./config.mjs";
 import { gate } from "./deps.mjs";
-import { pickFromList } from "./prompt.mjs";
+import { askInput, pickFromList } from "./prompt.mjs";
 import { commandPath, tryCapture } from "./run.mjs";
 
 const AIW_CONFIG_FILES = [
@@ -35,6 +35,7 @@ const DEFAULT_CONTEXT_MENU = [
 const INSTALL_HINTS = {
   git: "macOS: xcode-select --install or brew install git; Linux: use your distro package manager.",
   cmux: "Install cmux and make sure the cmux CLI is on PATH.",
+  tmux: "macOS: brew install tmux; Linux: use your distro package manager.",
   wt: "Install Worktrunk and make sure the wt CLI is on PATH.",
   yazi: "macOS: brew install yazi; Linux: use your distro package manager.",
   nvim: "macOS: brew install neovim; Linux: use your distro package manager.",
@@ -59,7 +60,7 @@ export async function commandInit(config, argv) {
   const codeRoot = path.resolve(expandHome(flags.codeRoot || path.join(os.homedir(), "Code")));
   const worktreesRoot = path.resolve(expandHome(flags.worktreesRoot || path.join(os.homedir(), "worktrees")));
   const sessionsRoot = path.resolve(expandHome(flags.sessionsRoot || path.join(os.homedir(), "Documents", "aiw")));
-  const cmuxScope = await selectCmuxScope(flags, codeRoot);
+  const cmuxScope = await selectCmuxScope(flags, codeRoot, Boolean(commandPath("cmux")));
   const launcher = flags.launcher || process.env.AIW_INIT_COMMAND || "npx --yes @chlrc/aiw";
   const plan = buildInitPlan({
     config,
@@ -82,6 +83,12 @@ export async function commandInit(config, argv) {
     const error = new Error("aiw init preflight failed; install missing blocking dependencies before retrying");
     error.exitCode = 10;
     throw error;
+  }
+  if (!flags.dryRun && plan.preflight.gate.missingRecommended.includes("cmux") && !await confirmRecommendedSkip(flags, "cmux")) {
+    if (!flags.json) {
+      console.log("Cancelled. No files were written.");
+    }
+    return;
   }
 
   if (flags.dryRun) {
@@ -229,9 +236,12 @@ function resolveConfigDir(explicitConfigDir) {
   return path.resolve(expandHome(explicitConfigDir || process.env.AIW_CONFIG_DIR || path.join(os.homedir(), ".config", "aiw")));
 }
 
-async function selectCmuxScope(flags, codeRoot) {
+async function selectCmuxScope(flags, codeRoot, cmuxAvailable) {
   if (flags.cmuxScope) {
     return normalizeCmuxScope(flags.cmuxScope);
+  }
+  if (!cmuxAvailable) {
+    return "none";
   }
   if (flags.yes || !process.stdin.isTTY) {
     return "home";
@@ -346,31 +356,31 @@ function mergeCmuxConfig(existing, launcher, cmuxPlan) {
   actions["aiw-new-worktree"] = cmuxAction({
     title: "AIW New Worktree",
     subtitle: "Create a Worktrunk worktree from the current workspace",
-    command: `${launcher} cmux-new`,
+    command: `${launcher} new`,
     icon: "folder.badge.plus"
   });
   actions["aiw-pick-directory"] = cmuxAction({
     title: "AIW Pick Directory",
-    subtitle: "Choose a repository before running aiw cmux-new",
-    command: `${launcher} cmux-new --pick-repo`,
+    subtitle: "Choose a repository before running aiw new",
+    command: `${launcher} new --pick-repo`,
     icon: "folder.badge.plus"
   });
   actions["aiw-local-workspace"] = cmuxAction({
     title: "AIW Local Workspace",
     subtitle: "Open the current checkout without creating a worktree",
-    command: `${launcher} cmux-new --local`,
+    command: `${launcher} new --local`,
     icon: "terminal"
   });
   actions["aiw-scratch-session"] = cmuxAction({
     title: "AIW Scratch Session",
     subtitle: "Open a non-project AIW session",
-    command: `${launcher} cmux scratch`,
+    command: `${launcher} scratch`,
     icon: "square.and.pencil"
   });
   actions["aiw-scratch-resume"] = cmuxAction({
     title: "AIW Resume Scratch Session",
     subtitle: "Pick a previous non-project AIW session",
-    command: `${launcher} cmux scratch resume`,
+    command: `${launcher} scratch resume`,
     icon: "clock.arrow.circlepath"
   });
   next.actions = actions;
@@ -582,6 +592,9 @@ function printPreflight(plan) {
     }
     console.log(`[missing] ${item}`);
   }
+  for (const item of preflight.gate.missingRecommended) {
+    console.log(`[recommended missing] ${item}`);
+  }
   const optionalMissing = preflight.optional.filter((item) => !item.ok);
   for (const item of optionalMissing) {
     console.log(`[optional missing] ${item.name}${item.command ? ` (${item.command})` : ""}`);
@@ -595,6 +608,19 @@ function printPreflight(plan) {
     return;
   }
   console.log("[ok] blocking dependency gate passed");
+}
+
+async function confirmRecommendedSkip(flags, dependency) {
+  if (flags.yes) {
+    return true;
+  }
+  if (!process.stdin.isTTY) {
+    const error = new Error(`recommended dependency '${dependency}' is missing; rerun with --yes to continue without it`);
+    error.exitCode = 10;
+    throw error;
+  }
+  const answer = await askInput(`Recommended dependency '${dependency}' is missing. Continue with tmux-only setup? Type y to confirm`);
+  return answer.toLowerCase() === "y";
 }
 
 function printPlan(plan) {
@@ -671,6 +697,14 @@ function parseInitFlags(argv) {
       case "--cmux":
         flags.cmuxScope = argv[++index];
         break;
+      case "--workstation-mode":
+        argv[++index];
+        flags.legacyWorkstationOption = true;
+        break;
+      case "--workstation-implementation":
+        argv[++index];
+        flags.legacyWorkstationOption = true;
+        break;
       case "--config-dir":
         flags.configDir = argv[++index];
         break;
@@ -710,6 +744,11 @@ function parseInitFlags(argv) {
         throw error;
       }
     }
+  }
+  if (flags.legacyWorkstationOption) {
+    const error = new Error("--workstation-mode and --workstation-implementation are no longer supported; AIW chooses tmux or cmux from the runtime");
+    error.exitCode = 2;
+    throw error;
   }
   return flags;
 }
