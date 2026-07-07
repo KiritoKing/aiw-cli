@@ -1,6 +1,6 @@
 # AIW Handoff
 
-更新时间：2026-06-17
+更新时间：2026-06-18
 
 ## 当前活动
 
@@ -12,6 +12,7 @@
 - 默认所有普通终端、Ghostty、SSH、无 GUI 开发机都走 tmux。
 - 只有当前进程在 cmux runtime 内，且 `cmux` CLI 可用时，才走 cmux 命令。
 - `aiw migrate` 已删除；旧 `[workstation]` 配置不再读取。
+- 当前命令面已整理到 `docs/2026-06-18-command-reference.md`。
 
 ## 当前实现边界
 
