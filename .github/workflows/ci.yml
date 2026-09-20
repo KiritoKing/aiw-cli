@@ -63,4 +63,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           AIW_VERSION: ${{ github.ref_name }}
-        run: gh release create "$AIW_VERSION" release/*.tar.gz release/checksums.txt --title "$AIW_VERSION" --generate-notes
+        run: gh release create "$AIW_VERSION" release/*.tar.gz release/checksums.txt --repo "$GITHUB_REPOSITORY" --title "$AIW_VERSION" --generate-notes
