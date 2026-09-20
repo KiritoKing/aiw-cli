@@ -15,10 +15,11 @@ import (
 )
 
 type RepoConfig struct {
-	Remote  string       `yaml:"remote" json:"remote"`
-	Base    string       `yaml:"base" json:"base"`
-	Setup   *RepoCommand `yaml:"setup,omitempty" json:"setup,omitempty"`
-	Cleanup *RepoCommand `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
+	Remote   string         `yaml:"remote" json:"remote"`
+	Base     string         `yaml:"base" json:"base"`
+	Setup    *RepoCommand   `yaml:"setup,omitempty" json:"setup,omitempty"`
+	Cleanup  *RepoCommand   `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
+	Metadata map[string]any `yaml:"metadata,omitempty" json:"metadata,omitempty"`
 }
 
 type RepoCommand struct {

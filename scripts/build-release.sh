@@ -8,6 +8,7 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_dir="${AIW_DIST_DIR:-$repo_root/dist}"
+build_version="${AIW_VERSION:-dev}"
 mkdir -p "$output_dir"
 
 for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
@@ -15,6 +16,8 @@ for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
   goarch="${target##*/}"
   artifact="$output_dir/aiw-$goos-$goarch"
   (cd "$repo_root" && env CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -buildvcs=false -trimpath -o "$artifact" ./cmd/aiw)
+    go build -buildvcs=false -trimpath \
+    -ldflags "-X github.com/KiritoKing/aiw-cli/internal/aiw.BuildVersion=$build_version" \
+    -o "$artifact" ./cmd/aiw)
   echo "built $artifact"
 done

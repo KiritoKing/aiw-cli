@@ -118,6 +118,19 @@ func TestInitSkipSkills(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
 		t.Fatal(err)
 	}
+	toolchain, err := os.ReadFile(toolchainPath(root))
+	if err != nil || !bytes.Contains(toolchain, []byte(`AIW_VERSION="dev"`)) || !bytes.Contains(toolchain, []byte("AIW_SHA256_LINUX_AMD64")) {
+		t.Fatalf("init did not write an AIW toolchain lock: %v\n%s", err, toolchain)
+	}
+	bootstrap := bootstrapPath(root)
+	info, err := os.Stat(bootstrap)
+	if err != nil || info.Mode().Perm() != 0755 {
+		t.Fatalf("init did not write an executable bootstrap script: %v, %v", info, err)
+	}
+	script, err := os.ReadFile(bootstrap)
+	if err != nil || !bytes.Contains(script, []byte("checksum mismatch")) || !bytes.Contains(script, []byte("installed AIW version")) {
+		t.Fatalf("bootstrap script is incomplete: %v", err)
+	}
 	if _, err := os.Lstat(filepath.Join(root, ".agents")); !os.IsNotExist(err) {
 		t.Fatalf("--skip-skills installed skills: %v", err)
 	}
@@ -131,6 +144,36 @@ func TestInitSkipSkills(t *testing.T) {
 	defer os.Chdir(previous)
 	if err := Run([]string{"agents", "sync"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGeneratedBootstrapRejectsIncompleteLockBeforeDownload(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("Git unavailable")
+	}
+	previousVersion := BuildVersion
+	BuildVersion = "v1.2.3"
+	defer func() { BuildVersion = previousVersion }()
+	t.Setenv("AIW_GIT", gitPath)
+	root := filepath.Join(t.TempDir(), "agent")
+	if err := runInit([]string{root, "--skip-skills"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bootstrapPath(root))
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "AIW_ARTIFACT_BASE_URL is required") {
+		t.Fatalf("bootstrap should reject an incomplete lock before download: %v\n%s", err, output)
+	}
+}
+
+func TestVersionOutput(t *testing.T) {
+	previousVersion := BuildVersion
+	BuildVersion = "v1.2.3"
+	defer func() { BuildVersion = previousVersion }()
+	output := captureStdout(t, func() error { return Run([]string{"version"}) })
+	if string(output) != "v1.2.3\n" {
+		t.Fatalf("unexpected version output: %q", output)
 	}
 }
 
@@ -254,6 +297,20 @@ func captureStdout(t *testing.T, run func() error) []byte {
 func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	f := newFixture(t)
 	f.mustRun(scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	cfg, err := loadProject(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := cfg.Repos["api"]
+	api.Metadata = map[string]any{"description": "API service", "tags": []string{"backend"}, "runtime": map[string]any{"go": "1.22"}}
+	cfg.Repos["api"] = api
+	if err := saveProject(f.root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadProject(f.root)
+	if err != nil || reloaded.Repos["api"].Metadata["description"] != "API service" {
+		t.Fatalf("metadata did not survive config round trip: %v", err)
+	}
 	previous, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +326,7 @@ func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	if err := json.Unmarshal(listOutput, &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 2 || listed[0].Name != "api" || !listed[0].Registered || listed[0].Source != f.source["api"] || listed[0].Store == "" {
+	if len(listed) != 2 || listed[0].Name != "api" || !listed[0].Registered || listed[0].Source != f.source["api"] || listed[0].Store == "" || listed[0].Metadata["description"] != "API service" {
 		t.Fatalf("unexpected repo list: %+v", listed)
 	}
 	f.checkout()

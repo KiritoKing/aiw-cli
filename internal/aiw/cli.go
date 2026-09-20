@@ -18,6 +18,12 @@ func Run(args []string) error {
 	switch args[0] {
 	case "init":
 		return runInit(args[1:])
+	case "version":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: aiw version")
+		}
+		fmt.Println(buildVersion())
+		return nil
 	case "agents":
 		return runAgents(args[1:])
 	case "doctor":
@@ -38,6 +44,7 @@ func printHelp() {
 
 Usage:
   aiw init <agent-repo-path> [--skip-skills]
+  aiw version
   aiw agents sync
   aiw doctor
   aiw repo list [--json] | register <name> --source <path> | scan <dir> | sync [name]
@@ -106,6 +113,9 @@ func runInit(args []string) error {
 	if _, err := os.Stat(filepath.Join(path, "aiw.yaml")); err == nil {
 		return fmt.Errorf("aiw.yaml already exists: %s", path)
 	}
+	if err := checkToolchainPaths(path); err != nil {
+		return err
+	}
 	if err := syncAgentInstructions(path); err != nil {
 		return err
 	}
@@ -131,6 +141,9 @@ func runInit(args []string) error {
 		if err := atomicWrite(ignore, []byte(content)); err != nil {
 			return err
 		}
+	}
+	if err := writeToolchainFiles(path); err != nil {
+		return err
 	}
 	if !skipSkills {
 		if err := installSkills(path); err != nil {
@@ -202,7 +215,7 @@ func runRepo(args []string) error {
 			rows := make([]RepoListRow, 0, len(names))
 			for _, name := range names {
 				repo := cfg.Repos[name]
-				row := RepoListRow{Name: name, Remote: redactCredentials(repo.Remote), Base: repo.Base}
+				row := RepoListRow{Name: name, Remote: redactCredentials(repo.Remote), Base: repo.Base, Metadata: repo.Metadata}
 				if entry, ok := registry.Repos[canonicalRemote(repo.Remote)]; ok {
 					row.Registered, row.Source, row.Store = true, entry.Source, entry.Store
 				}
@@ -262,12 +275,13 @@ func runRepo(args []string) error {
 }
 
 type RepoListRow struct {
-	Name       string `json:"name"`
-	Remote     string `json:"remote"`
-	Base       string `json:"base"`
-	Registered bool   `json:"registered"`
-	Source     string `json:"source,omitempty"`
-	Store      string `json:"store,omitempty"`
+	Name       string         `json:"name"`
+	Remote     string         `json:"remote"`
+	Base       string         `json:"base"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	Registered bool           `json:"registered"`
+	Source     string         `json:"source,omitempty"`
+	Store      string         `json:"store,omitempty"`
 }
 
 type stringFlags []string

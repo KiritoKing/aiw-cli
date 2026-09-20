@@ -24,7 +24,7 @@ go run ./cmd/aiw --help
 go build -buildvcs=false -o ./build/aiw ./cmd/aiw
 ```
 
-源码发布后可运行 `go install github.com/KiritoKing/aiw-cli/cmd/aiw@latest`。`scripts/build-release.sh` 在本地生成 macOS/Linux 的 arm64、amd64 二进制；脚本只构建，不上传。旧 npm 包的命令面不再由此仓库维护。
+源码发布后可运行 `go install github.com/KiritoKing/aiw-cli/cmd/aiw@latest`。`scripts/build-release.sh` 在本地生成 macOS/Linux 的 arm64、amd64 二进制；脚本只构建，不上传。GitHub Actions 会在 PR 和 `master` 上验证、构建四个平台二进制，并在推送 `v*` tag 后把带版本的压缩包和 `checksums.txt` 发布到同名 GitHub Release。干净开发容器应从团队镜像的制品库下载仓库锁定版本，并校验 SHA-256，不应依赖 `latest` 或 `curl | sh`。`aiw version` 输出当前二进制版本；本地未注入版本的构建为 `dev`。旧 npm 包的命令面不再由此仓库维护。
 
 默认本机数据目录是 `~/.local/share/aiw`，可用 `AIW_HOME` 覆盖。Git 命令默认从 `PATH` 解析；需要指定 Git 可执行文件时设置 `AIW_GIT`。
 
@@ -56,6 +56,8 @@ aiw init ~/agent-repos/account-stack
 
 `init` 默认运行社区 `npx skills add`，从 [AIW 公开仓库](https://github.com/KiritoKing/aiw-cli)把 `aiw-init` 和 `aiw-reference` 安装到项目 `.agents/skills`。它使用项目级、非交互和复制安装；社区工具可能同时生成 `skills-lock.json`。缺少 Node 或 npx 时，Go 二进制使用构建时内置的两份 skill 兜底；已有不同内容的同名文件不会被覆盖。若 Node 可用但安装失败，`init` 会报告错误并保留已生成的 Agent Repo 文件，方便单独处理安装。安装其他工具或使用自定义分发方式时运行 `aiw init <path> --skip-skills`。已有 Agent Repo 可运行 `aiw agents sync`，只覆盖标记区块内的内容；标记损坏或 `AGENTS.md` 是符号链接时会拒绝写入。skill 的后续更新使用社区工具或自己的安装器，AIW 不维护更新器。
 
+初始化还会生成 `.aiw/aiw-toolchain.env` 与可执行的 `.aiw/bootstrap-aiw.sh`。前者必须作为 Agent Repo 配置提交：发布版 `aiw init` 会写入创建者的精确版本；把 `AIW_ARTIFACT_BASE_URL` 改为团队制品目录，并从同一 Release 的 `checksums.txt` 填入当前平台的四个 SHA-256。开发版会写入 `AIW_VERSION="dev"`，不能用于下载。脚本会在下载前拒绝空地址、空校验和或 `dev`，仅接受 HTTPS，校验归档并用 `aiw version` 回读。容器 bootstrap 可执行：`export PATH="$(./.aiw/bootstrap-aiw.sh):$PATH"`；也可以通过 `AIW_BIN_DIR` 指定临时安装目录。已有同名锁文件或脚本时，`init` 拒绝覆盖。
+
 > 当前公开仓库的 skills 尚未发布本版 Go 工作流内容。AIW 会核对安装内容的工作流标记，发现旧版时让 `init` 报错；已生成的 Agent Repo 文件与社区工具写入的 skill 文件会保留，需检查后用自己的安装器替换。本地开发可用 `--skip-skills`，或在隔离项目中自行从当前源码安装。
 
 ```yaml
@@ -66,6 +68,9 @@ repos:
   web:
     remote: git@github.com:example/web.git
     base: main
+    metadata:
+      description: Customer web application
+      tags: [frontend]
     setup:
       command: ./scripts/aiw-setup.sh
       args: []
@@ -78,6 +83,7 @@ repos:
 ```
 
 `aiw.yaml` 描述固定可用的仓库集合，不包含个人路径。`base` 是 Agent Repo 的基线分支；每个业务仓也有自己的基线分支。
+每仓可选的 `metadata` 是项目自定义信息，例如职责、标签或服务标识。AIW 不用它决定物化和生命周期行为；它会随 `repo list --json` 返回，故不要在其中放密钥或本机路径。仓库 ID 是 `repos` 下的键，业务 worktree 链接路径固定为 `repos/<name>`；不需要再维护第二份带 ID、remote、base 的清单。
 每仓的 `setup`、`cleanup` 可选，命令及参数从 Agent Repo **基线分支已提交的** `aiw.yaml` 读取。命令在对应业务仓 worktree 内直接执行，不经过 shell；相对脚本路径相对该业务仓。执行时提供 `AIW_CHANGE_ROOT`、`AIW_CHANGE_BRANCH`、`AIW_REPO_NAME`、`AIW_REPO_PATH` 和 `AIW_LIFECYCLE_ACTION` 环境变量。脚本应支持重试；逐仓脚本不可递归调用 AIW Change 命令。
 
 根仓的 SDD 或知识初始化由团队自己的提示词、Agent 和工具完成：它可以整理跨仓职责、候选仓库和需求上下文，再在本次 Change 的方案中确定要物化的仓库。`aiw.yaml` 仍只列可物化仓库；AIW 不要求 OpenSpec，也不替团队生成业务知识。
@@ -95,7 +101,7 @@ aiw repo sync web
 
 `register` 校验本地 checkout 的 `origin` 与清单 remote，再从它建立独立的 bare Git store。`scan` 递归查找已有仓库，遇到 `.git` 就停止扫描其子目录；同一 remote 匹配多个 checkout 时拒绝自动选择。原 checkout 不会被修改。`sync` 是显式网络 fetch；Change 物化不会隐式 fetch，也不会自动克隆缺失仓库。
 `scan` 只匹配 `aiw.yaml` 已声明的仓库，不会修改该文件。如果 `repos: {}`，先填入各仓的 `remote` 和 `base`；空清单会返回明确错误，其他零匹配情况也会报告。
-`repo list --json` 按仓库名返回 `name`、`remote`、`base`、`registered`；已登记仓库还包含本机 `source` 与 `store` 路径。remote URL 中的凭据会脱敏。命令只读取配置和本机登记表。
+`repo list --json` 按仓库名返回 `name`、`remote`、`base`、`registered`，配置了 `metadata` 时也返回该对象；已登记仓库还包含本机 `source` 与 `store` 路径。remote URL 中的凭据会脱敏。命令只读取配置和本机登记表。
 
 ## 接入任意控制面
 
