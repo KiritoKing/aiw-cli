@@ -1,139 +1,24 @@
 ---
 name: aiw-init
-description: Initialize, bootstrap, configure, or troubleshoot the AIW CLI environment for a user. Use when the user asks about installing AIW, running `npx @chlrc/aiw init`, setting up tmux/cmux workstation runtime support, choosing AIW config paths, checking dependency gates, diagnosing setup failures, or answering questions about the AIW initialization flow.
+description: Set up the Go-based AIW CLI, initialize an Agent Repo, and register existing local business repositories for multi-repo Git worktree assembly.
 ---
+
+<!-- AIW-GO-WORKTREE-V1 -->
 
 # AIW Init
 
-## Purpose
+AIW assembles business Git worktrees inside an Agent Repo worktree created by a separate control plane. It needs Go 1.22+ to build and a working Git CLI at runtime. It does not configure tmux, cmux, Worktrunk, Agent sessions, or OpenSpec.
 
-Help users get AIW ready on a machine without turning setup into a blind write operation. AIW is a thin orchestration CLI for Worktrunk, tmux/cmux workstation runtime support, lazygit, delta, yazi, nvim, and agent CLIs.
+## Setup
 
-## Operating Rules
+1. Check `aiw --help` or, from an AIW source checkout, `go run ./cmd/aiw --help`. Run `aiw doctor` to verify Git and the current Agent Repo when applicable.
+2. Run `aiw init <path>` only when the user asks to create or initialize that Agent Repo. The command may run `git init` in a new empty path; it refuses a nonempty non-Git directory. It writes `aiw.yaml`, a `/repos/` ignore rule, and an AIW-managed block in `AGENTS.md`, without committing them. It also invokes the community `npx skills add` CLI to install AIW skills from the public AIW repository at project scope. If Node or npx is absent, the Go binary installs its bundled snapshot without overwriting conflicting files. Use `--skip-skills` when the user will install skills with another tool.
+3. Edit `aiw.yaml` with the stable repository set. Each repo needs a portable `remote` and a `base` branch; optional `setup` and `cleanup` entries use `command` and `args` and run inside the business worktree. Commit this config through the normal Git workflow; lifecycle commands read the committed Agent Repo baseline.
+4. Use `aiw repo register <name> --source <existing-checkout>` or `aiw repo scan <directory>`. Scan stops descending when it finds `.git` and rejects ambiguous matches. Registration makes a machine-local bare store without editing the source checkout.
+5. Use `aiw repo sync [name]` only when a fresh remote baseline is requested. Creating business worktrees never implicitly fetches or clones.
 
-- Prefer a read-only preflight first. Use `doctor`, `init --dry-run`, or direct `command -v` checks before applying setup changes.
-- Treat `aiw init` as a write operation. Run it for real only when the user explicitly wants initialization to proceed.
-- Do not use `--force` unless the user explicitly wants existing AIW config files overwritten.
-- Do not claim that `aiw init` installs agent skills. Current AIW init prints `[skip] skills initialization`; install skills separately with the npm `skills` CLI.
-- Keep AIW personal workflow config out of business repositories by default.
-- Discuss cmux config registration as optional integration only; tmux remains the required runtime for normal use.
+For an existing Agent Repo, run `aiw agents sync` to update only the text between `<!-- aiw:start -->` and `<!-- aiw:end -->`. Keep team rules outside that block. Use the community skills CLI or another installer for future skill updates; AIW has no skill updater. Until the public AIW repository publishes the Go-oriented skills, do not treat a successful remote skill install as validation of the new workflow.
 
-## Resolve the AIW Command
+The local store defaults to `~/.local/share/aiw`; `AIW_HOME` overrides it. `AIW_GIT` can select a working Git executable. Local paths belong in the machine registry, never in `aiw.yaml`.
 
-Use the package path first. Users do not need to clone the AIW repository just to initialize a machine:
-
-```bash
-npx @chlrc/aiw init --help
-npx @chlrc/aiw init --dry-run --yes
-```
-
-After initialization, prefer the installed `aiw` binary for daily checks:
-
-```bash
-aiw --help
-aiw doctor
-```
-
-For frequent use, local customization, or AIW development, a local checkout is recommended later:
-
-```bash
-node bin/aiw --help
-```
-
-When initializing from the scoped package, store the scoped launcher in cmux actions unless the user has already installed an `aiw` binary:
-
-```bash
-npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --dry-run --yes
-```
-
-The current CLI default launcher is `npx --yes @chlrc/aiw`. Do not use `npx aiw`; that resolves to a different npm package.
-
-## Workstation Runtime
-
-AIW supports two runtime implementations:
-
-- `tmux`: required. AIW uses it by default in normal terminals, Ghostty, SSH, and no-GUI machines.
-- `cmux`: recommended but optional. AIW uses it only when running inside cmux and the `cmux` CLI is available.
-
-Check current runtime and dependency gates:
-
-```bash
-aiw doctor --json
-aiw doctor --gate new --agent codex
-aiw doctor --gate layout --agent codex
-aiw doctor --gate scratch --agent codex
-```
-
-Gate behavior:
-
-- Missing `tmux` is blocking.
-- Missing `cmux` is recommended/warn-level.
-- A real `aiw init` run without cmux requires `--yes` or interactive confirmation to continue with tmux-only setup.
-
-## Setup Workflow
-
-1. Identify the user's target paths:
-   - Config: `~/.config/aiw`, or `$AIW_CONFIG_DIR` when set.
-   - Code root: default `~/Code`.
-   - Worktrees root: default `~/worktrees`.
-   - Scratch sessions root: default `~/Documents/aiw`.
-   - Optional cmux config scope: `home`, `code`, or `none`.
-
-2. Run dependency and setup preflight:
-
-```bash
-aiw doctor
-aiw doctor --gate init --agent codex
-aiw init --dry-run --yes
-```
-
-For first-time package bootstrap:
-
-```bash
-npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --dry-run --yes
-```
-
-3. Explain blockers from the output:
-   - Common blockers: Node/npx, Git, Worktrunk (`wt`), tmux, yazi, lazygit, nvim, the default layout/commit agent, and `delta` when the lazygit overlay is configured.
-   - Recommended dependency: cmux.
-   - Optional tools such as `fd`, `eza`, and non-default agents should be reported without blocking unrelated setup.
-
-4. Apply only after the user intends it:
-
-```bash
-npx @chlrc/aiw init --launcher "npx --yes @chlrc/aiw" --yes
-```
-
-Useful variants:
-
-```bash
-npx @chlrc/aiw init --cmux-scope home --yes
-npx @chlrc/aiw init --cmux-scope none --yes
-npx @chlrc/aiw init --sessions-root ~/Documents/aiw --yes
-npx @chlrc/aiw init --config-dir ~/.config/aiw --no-reload --yes
-```
-
-5. Verify after setup:
-
-```bash
-aiw doctor
-aiw doctor --gate new --agent codex
-aiw layout --agent codex --dry-run
-aiw scratch --agent codex --dry-run
-```
-
-When validating cmux registration, check that the AIW actions exist rather than editing cmux config manually:
-
-- `aiw-new-worktree` -> `aiw new`
-- `aiw-pick-directory` -> `aiw new --pick-repo`
-- `aiw-local-workspace` -> `aiw new --local`
-- `aiw-scratch-session` -> `aiw scratch`
-- `aiw-scratch-resume` -> `aiw scratch resume`
-
-## Troubleshooting
-
-- If setup fails before writing files, install the missing blocking dependency and rerun the dry-run command.
-- If cmux config parsing fails, inspect the target JSON/JSONC file and fix invalid syntax before rerunning init.
-- If an agent command is missing, install that agent CLI or edit `~/.config/aiw/agents.toml` to point at an available command.
-- If `fnm_multishells ... Operation not permitted` appears before command output, treat it as shell startup noise when the actual AIW command succeeds.
-- If the user only wants setup advice, answer from the preflight evidence and do not apply changes.
+For a new control plane integration, have the control plane create the Agent Repo worktree first. AIW's later `change materialize` command works inside that worktree and does not create it.

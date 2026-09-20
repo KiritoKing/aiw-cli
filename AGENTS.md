@@ -1,165 +1,47 @@
-# AGENTS.md
+# AIW Agent Guide
 
-This file applies to the entire `aiw` workspace.
+本文件适用于整个 `aiw` 仓库。仓库当前实现是 Go CLI。开始非平凡修改前，先读 `README.md`、`docs/development.md` 和 `HANDOFF.md`，再核对相关源码与测试。`docs/` 下已有日期的旧设计稿是只读历史记录，不代表当前命令面。
 
-`AGENTS.md` is an agent-facing project guide. Keep it short, operational, and aligned with the actual code and docs in this repo.
+## 产品边界
 
-## Project Context
+- 控制面（Codex App、Paseo 等）创建和关闭 Agent Repo 的 Change worktree；AIW 不接管其生命周期或 Agent session。
+- Agent Repo 的 `aiw.yaml` 声明固定仓库集合。Change worktree 中的 `.aiw/change.yaml` 声明本次需要的子集。AIW 在方案确定后按清单物化业务仓，并允许再次物化以修正范围。
+- AIW 只管理自己创建的业务仓 worktree 和 `repos/` 符号链接。原业务 checkout 不得被修改；Agent Repo 不包含业务代码、submodule 或 subtree。
+- 控制面与 Agent 推进 Propose、物化和任务分发；`materialize` 仅在全部已选业务仓 setup 成功后视为就绪。控制面的 cleanup script 调用 `change close`，其成功后才删除根 worktree。AIW 在释放业务仓前执行逐仓 cleanup。
+- 不实现 OpenSpec、Agent 控制、终端面板、业务提交、合并、push、PR 或发布流程。
+- 根仓 `AGENTS.md` 的 AIW 托管区块仅讲多仓 Git 规则；用户规则保留在区块外。默认 skill 安装交给社区 `npx skills`，缺少 Node/npx 时才使用有限的 Go 兜底；AIW 不维护 skill 更新器。
 
-`aiw` is a personal AI programming workflow CLI. It is intentionally a thin orchestration layer:
+## 实现位置
 
-- `aiw` owns workflow decisions, config loading, dependency gates, prompts, command routing, and workstation layout plans.
-- Worktrunk owns worktree lifecycle.
-- tmux owns the default workstation panes in all normal terminals.
-- cmux owns panes only when AIW is running inside cmux and the `cmux` CLI is available.
-- lazygit owns Git TUI operations.
-- delta owns diff rendering.
-- agent CLIs own model interaction.
-- yazi, nvim, rg, fd, fzf, bat, and eza keep their native responsibilities.
+- `cmd/aiw/main.go`：CLI 入口。
+- `internal/aiw/cli.go`：命令路由。
+- `internal/aiw/config.go`：项目清单、Change 选择清单和本机状态。
+- `internal/aiw/store.go`：本地仓登记、扫描和显式同步。
+- `internal/aiw/change.go`、`close.go`：业务 worktree 物化、状态、修复和释放。
+- `internal/aiw/lifecycle.go`：基线脚本定义、逐仓 setup/cleanup 及执行状态。
+- `internal/aiw/git.go`：通过系统 Git CLI 执行 Git 操作。
+- `internal/aiw/agent_context.go`、`skill_install.go`：托管区块同步及默认/兜底 skill 安装。
+- `internal/aiw/completions/`：zsh、bash 补全脚本。
+- `docs/development.md`：现行开发上下文和变更文档约定；`HANDOFF.md`：当前活动交接。
 
-Do not turn `aiw` into a terminal emulator, Git client, editor, diff viewer, daemon, task database, or agent manager.
+## 开发规则
 
-## Read First
+- 使用 Go 1.22+；首版目标平台为 macOS 和 Linux。保持依赖少，不用 Go 库重写 Git 语义。
+- 创建业务 worktree 前核对清单、注册表、基线和分支冲突。删除前核对登记路径、Git common dir 和分支；有本地数据时按 CLI 风险确认处理。
+- 不在物化过程中隐式 fetch、clone、push 或提交外部流程写入的 `.aiw/change.yaml`。AIW 自己修改选择清单时只提交该文件。
+- 更新 Agent Repo 规则时只替换完整的 `<!-- aiw:start -->` / `<!-- aiw:end -->` 区块，保护区块外字节；兜底 skill 安装不覆盖已有不同内容的文件。
+- 逐仓 setup/cleanup 命令取自基线分支已提交的 `aiw.yaml`，在业务仓 worktree 中执行。持久化脚本状态；脚本中不得递归调用 AIW Change 命令。`repair` 不自动重放结果未知的脚本。
+- 重大变更开始实现前，先在 `docs/` 新建带日期的设计记录，说明现状、目标、影响范围、兼容或迁移方式、数据安全边界和验收方法；产品边界、CLI 契约、持久化格式、worktree 生命周期或失败恢复语义变化都适用。现行架构有变化时同步更新 `docs/development.md`。已有日期的历史记录不回写。
+- 每次变更实现并验证后、交付前都更新根目录 `HANDOFF.md`，只保留当前活动的有效上下文、验证证据与剩余事项；长期工作日志另存为新的带日期 `docs/` 文档。面向用户的行为变化同时更新 `README.md`。
+- 保留无关的本地改动。
+- 不启动开发服务器。
 
-Before making non-trivial changes, read:
-
-- `README.md` for command behavior.
-- `docs/2026-05-29-design.md` for historical product boundaries.
-- `HANDOFF.md` for current progress and known gaps.
-- `docs/2026-06-12-workstation-backend-migration.md` for the current workstation runtime model.
-
-## Repository Layout
-
-- `bin/aiw`: executable entrypoint.
-- `src/cli.mjs`: top-level command dispatch.
-- `src/config.mjs`: config loading and agent resolution.
-- `src/workstation.mjs`: runtime UI detection, dependency helpers, UI open/close adapters.
-- `src/deps.mjs`: dependency gates and doctor output.
-- `src/git.mjs`: Git repo, repo picker, and branch selection helpers.
-- `src/layout.mjs`: neutral project/scratch layout models plus cmux adapter.
-- `src/commit.mjs`: AI commit workflow.
-- `src/agent.mjs`: agent invocation and output cleanup.
-- `src/run.mjs`: process execution helpers.
-- `config/aiw.toml`: default workflow config.
-- `config/agents.toml`: agent command adapters.
-- `config/commit-prompt.md`: base AI commit prompt.
-- `config/lazygit-delta.yml`: lazygit overlay used by `aiw git`.
-- `docs/`: design notes and handoff records.
-
-## Development Commands
-
-Use the checked-out CLI while developing:
+## 验证
 
 ```bash
-node bin/aiw --help
-node bin/aiw doctor
-node bin/aiw doctor --gate git
-node bin/aiw doctor --gate new --agent codex
-node bin/aiw doctor --gate layout --agent codex
-node bin/aiw layout --agent codex --dry-run
-node bin/aiw new --repo ~/Code/my-repo --branch feat/foo --agent codex --dry-run
+go test ./...
+go vet ./...
+scripts/build-release.sh
 ```
 
-Run this after code changes:
-
-```bash
-npm run check
-```
-
-There is no full automated test suite yet. For risky CLI behavior, create a temporary Git repo under `/private/tmp` and verify the relevant command non-interactively where possible.
-
-## Coding Rules
-
-- Use Node.js ESM and keep compatibility with Node >= 18.
-- Keep the CLI dependency-light; do not add npm dependencies unless the workflow clearly needs them.
-- Prefer small functions and explicit exit codes over broad abstractions.
-- Keep config parsing and command routing predictable.
-- In a TTY, missing required CLI arguments should open a searchable TUI/picker by default; non-interactive calls should error or preserve the underlying tool default behavior.
-- When adding a command that depends on an external tool, add or update a dependency gate in `src/deps.mjs`.
-- When adding user-facing behavior, update `README.md` or `docs/` in the same change.
-- Do not start development servers from this repo.
-- Do not write personal workflow files into business repositories by default.
-- Do not auto-run `git init` in non-Git directories.
-
-## Product Boundaries
-
-Preserve these constraints:
-
-- `new` and `layout` must pass the workstation dependency gate before creating worktrees or opening UI.
-- `cmux-new` remains a compatibility alias; do not make it the primary command in new docs or generated config.
-- `aiw commit` expects staged changes and should not silently stage files for the user.
-- Commit generation must read staged diff, support custom prompt injection, commit via `git commit -F -`, and retry hook failures according to config.
-- `aiw git` should load the AIW lazygit overlay by default, but direct `lazygit` should remain untouched.
-- `aiw diff` may use `cmux-git-diff` when installed, otherwise `git diff | delta`; do not describe it as a built-in diff viewer.
-
-## cmux Safety
-
-cmux is optional runtime integration. AIW should run through tmux outside cmux, and should call cmux commands only from a cmux runtime.
-
-- Do not edit a user's existing `<code-root>/.cmux/cmux.json` unless the user explicitly asks for that exact change.
-- A previous attempt to inject AIW into cmux config broke the user's existing cmux reload behavior and was rolled back.
-- Future cmux integration should be conservative: inspect current config, generate a preview, back up, validate with `cmux config check`, then ask before applying if the change affects existing actions.
-
-## lazygit and AI Commit
-
-`aiw git` injects `config/lazygit-delta.yml` using lazygit's `--use-config-file`.
-
-Current lazygit overlay behavior:
-
-- Uses delta for diff display.
-- Adds `Ctrl-A` as a global lazygit custom command.
-- `Ctrl-A` prompts for optional extra commit instructions and runs `aiw commit --prompt ...`.
-
-Do not replace lazygit's native commit key. AI commit should remain an additional path.
-
-## Validation Checklist
-
-For code changes:
-
-```bash
-npm run check
-```
-
-For Git/lazygit changes:
-
-```bash
-node bin/aiw doctor --gate git
-ruby -ryaml -e 'YAML.load_file("config/lazygit-delta.yml")'
-```
-
-For AI commit changes:
-
-```bash
-node bin/aiw doctor --gate commit --agent codex
-```
-
-Also verify with a temporary Git repo and staged changes when changing `src/commit.mjs`.
-
-For workstation/worktree changes:
-
-```bash
-node bin/aiw doctor --gate new --agent codex
-node bin/aiw doctor --gate layout --agent codex
-node bin/aiw doctor --gate scratch --agent codex
-node bin/aiw layout --agent codex --dry-run
-node bin/aiw new --repo <repo> --branch <branch> --agent codex --dry-run
-node bin/aiw scratch --agent codex --root /private/tmp/aiw-sessions --id smoke --dry-run
-```
-
-## Known Environment Notes
-
-- Do not assume every checkout has a remote configured; inspect Git state before push or release work.
-- `fd` may be missing locally, which affects `aiw pick`.
-- `cmux-git-diff` may be missing locally; `aiw diff` should fall back to delta.
-- `cmux` is recommended but not required for normal tmux workstation use.
-- `aider` may be missing; this only affects selecting the aider agent.
-- Shell output may include `fnm_multishells ... Operation not permitted`; ignore it if the actual command succeeded.
-
-## Documentation Practice
-
-- Keep repo-facing docs in Simplified Chinese when documenting workflow decisions for the user.
-- Keep command examples copy-pasteable.
-- When changing workflow behavior, update `handoff.md` if the next agent would need to know it.
-- This project uses a file-contract handoff model. At the end of every task, maintain `handoff.md`: keep only the current work activity context, remove stale context, and add any context introduced or changed by the current task.
-- If a work log is worth preserving beyond the current activity, write it under `docs/` with the date in the filename as the index.
-- Dated work logs under `docs/` are historical records and are read-only by default. Do not modify existing logs unless the user explicitly asks; create a new dated log when there is valuable new history to preserve.
+`internal/aiw/integration_test.go` 使用临时 Git 仓验证控制面先创建根 worktree、AIW 后物化和关闭的流程。必要时以 `AIW_GIT` 指定可运行的 Git 路径。测试需同时覆盖正常流程、仓库范围变更、重复扫描、未推送与脏 worktree，以及中断恢复。
