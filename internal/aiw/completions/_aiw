@@ -1,0 +1,70 @@
+#compdef aiw
+
+_aiw() {
+  local -a commands
+
+  if (( CURRENT == 2 )); then
+    commands=(init agents doctor repo change completion help)
+    compadd -- $commands
+    return
+  fi
+
+  case "${words[2]}" in
+    init)
+      if (( CURRENT == 3 )); then
+        _files -/
+        compadd -- --skip-skills
+      elif (( CURRENT == 4 )); then
+        compadd -- --skip-skills
+      fi
+      ;;
+    agents)
+      (( CURRENT == 3 )) && compadd -- sync
+      ;;
+    completion)
+      (( CURRENT == 3 )) && compadd -- zsh bash
+      ;;
+    repo)
+      if (( CURRENT == 3 )); then
+        commands=(list register scan sync)
+        compadd -- $commands
+        return
+      fi
+      case "${words[3]}" in
+        list)
+          compadd -- --json
+          ;;
+        scan)
+          (( CURRENT == 4 )) && _files -/
+          ;;
+        register)
+          if [[ "${words[CURRENT-1]}" == --source ]]; then
+            _files -/
+          elif (( CURRENT >= 5 )); then
+            compadd -- --source
+          fi
+          ;;
+      esac
+      ;;
+    change)
+      if (( CURRENT == 3 )); then
+        commands=(select add-repo remove-repo materialize setup cleanup repair status list path open close)
+        compadd -- $commands
+        return
+      fi
+      case "${words[3]}" in
+        select)
+          compadd -- --repo
+          ;;
+        status)
+          compadd -- --json
+          ;;
+        close)
+          compadd -- --allow-unpushed --discard-changes
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_aiw "$@"

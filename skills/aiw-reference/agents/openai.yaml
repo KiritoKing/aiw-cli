@@ -1,4 +1,4 @@
 interface:
   display_name: "AIW Reference"
-  short_description: "Run AIW workstation automation safely"
-  default_prompt: "Use $aiw-reference to inspect AIW workstation/workspace state and cleanly finish or garbage-collect worktrees."
+  short_description: "Assemble business worktrees in a Change"
+  default_prompt: "Use $aiw-reference to materialize and inspect the business repositories selected for this Change."
