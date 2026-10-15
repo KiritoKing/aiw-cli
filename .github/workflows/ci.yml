@@ -19,6 +19,11 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+          cache-dependency-path: |
+            go.sum
+            .harness/architecture/go.sum
+      - name: Check architecture boundaries
+        run: scripts/check-architecture.sh
       - run: go test ./...
       - run: go vet ./...
       - run: scripts/build-release.sh

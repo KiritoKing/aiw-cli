@@ -28,9 +28,24 @@ go build -buildvcs=false -o ./build/aiw ./cmd/aiw
 
 默认本机数据目录是 `~/.local/share/aiw`，可用 `AIW_HOME` 覆盖。Git 命令默认从 `PATH` 解析；需要指定 Git 可执行文件时设置 `AIW_GIT`。
 
+### 命令帮助与参数
+
+命令层使用 Cobra，从同一份命令定义生成帮助和补全。各级帮助可在任意目录运行，不要求 Git 可用或已初始化 Agent Repo，也不会创建本机状态：
+
+```bash
+aiw --help
+aiw repo --help
+aiw help change close
+aiw change close --help
+```
+
+不带子命令的 `aiw`、`aiw repo`、`aiw change`、`aiw agents` 和 `aiw completion` 显示帮助并成功退出。未知命令、未知选项、缺失必需参数和多余位置参数会在读取业务上下文或执行操作前报错。选项可放在位置参数前后，例如 `aiw repo register --source ~/Code/web web` 与 `aiw repo register web --source ~/Code/web` 等价；路径以 `-` 开头时可用 `--` 分隔位置参数。
+
+布尔选项支持 `--json` 和 `--json=false`。选择多个仓库仍须重复 `--repo`，例如 `--repo web --repo api`；`--repo web,api` 不会拆成两个仓库。`aiw version` 保持单行版本输出，现有 JSON 输出结构保持不变。
+
 ### Shell Tab 补全
 
-`aiw completion zsh` 和 `aiw completion bash` 输出对应的补全脚本，支持顶层及 `repo`、`change` 子命令和常用选项。在 zsh 中，将脚本放进 `fpath` 中已配置的补全目录，再打开新终端。例如使用 Oh My Zsh 默认目录时：
+`aiw completion zsh` 和 `aiw completion bash` 从当前命令树生成补全脚本，覆盖 `version` 等顶层命令、子命令和选项。运行补全时 `aiw` 须在 `PATH` 中；升级后重新生成已安装的脚本。在 zsh 中，将脚本放进 `fpath` 中已配置的补全目录，再打开新终端。例如使用 Oh My Zsh 默认目录时：
 
 ```bash
 aiw completion zsh > ~/.oh-my-zsh/custom/completions/_aiw
@@ -43,7 +58,7 @@ autoload -Uz _aiw
 compdef _aiw aiw
 ```
 
-在 bash 中，可将 `source <(aiw completion bash)` 加到 `~/.bashrc`，或在当前会话中执行一次。
+在 bash 中，需要先安装并加载与你的 Bash 版本兼容的 [bash-completion](https://github.com/scop/bash-completion)，确认 `type _get_comp_words_by_ref` 能找到函数，再将 `source <(aiw completion bash)` 加到 `~/.bashrc` 的 bash-completion 加载之后，或在当前会话中执行一次。这是迁移到 Cobra 生成补全后的新增前提；生成脚本本身不要求安装该包。
 
 ## 初始化固定 Agent Repo
 
@@ -143,10 +158,15 @@ aiw change close
 
 ## 开发验证
 
+源码按职责分层：`cmd/aiw` 是进程入口，`internal/commands` 声明 Cobra 命令，`internal/aiw.Service` 执行业务操作及统一加锁，`internal/gitcli` 与 `internal/localfs` 提供底层 Git/文件能力。阅读代码可沿这个依赖方向进入；业务配置、选择清单、登记表与执行状态分别保存在 aiw 包的独立文件中。
+
 ```bash
+scripts/check-architecture.sh
 go test ./...
 go vet ./...
 scripts/build-release.sh
 ```
+
+也可运行 `scripts/verify.sh` 一次完成以上验证。架构规则与工具位于 `.harness/architecture` 独立 Go module，固定开发依赖，不加入 AIW 运行时模块。门禁检查所有 Go 源文件（包含测试、build tag 和其他平台源码），拒绝未分类目录和越层依赖；CI 在测试及构建前执行同一检查。完整边界与规则变更约定见 [架构与开发门禁](docs/architecture.md)。
 
 集成测试使用临时 Git 仓库，不访问真实业务仓。若系统 `git` 启动被 Xcode 许可状态阻断，可以给测试指定已安装的 Git，例如 `AIW_GIT=/Library/Developer/CommandLineTools/usr/bin/git go test ./...`。

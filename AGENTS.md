@@ -14,15 +14,18 @@
 ## 实现位置
 
 - `cmd/aiw/main.go`：CLI 入口。
-- `internal/aiw/cli.go`：命令路由。
-- `internal/aiw/config.go`：项目清单、Change 选择清单和本机状态。
-- `internal/aiw/store.go`：本地仓登记、扫描和显式同步。
+- `internal/commands/`：Cobra 根入口、命令参数、帮助和补全；只调用业务入口。
+- `internal/aiw/service.go`：业务操作入口，统一上下文、锁与生命周期递归门禁。
+- `internal/aiw/project.go`、`selection.go`、`registry.go`、`state.go`、`paths.go`：项目清单、Change 选择、本机状态和路径规则。
+- `internal/aiw/repo.go`、`repo_list.go`：本地仓登记、扫描、显式同步和列表。
 - `internal/aiw/change.go`、`close.go`：业务 worktree 物化、状态、修复和释放。
 - `internal/aiw/lifecycle.go`：基线脚本定义、逐仓 setup/cleanup 及执行状态。
-- `internal/aiw/git.go`：通过系统 Git CLI 执行 Git 操作。
+- `internal/gitcli/`：通过系统 Git CLI 执行 Git 操作及解析输出，仅依赖标准库。
+- `internal/localfs/`：原子写入与文件锁，仅依赖标准库。
 - `internal/aiw/agent_context.go`、`skill_install.go`：托管区块同步及默认/兜底 skill 安装。
-- `internal/aiw/completions/`：zsh、bash 补全脚本。
+- `internal/commands/completion.go`：从 Cobra 命令树生成 zsh、bash 补全。
 - `docs/development.md`：现行开发上下文和变更文档约定；`HANDOFF.md`：当前活动交接。
+- `.harness/architecture/`：独立开发模块与依赖规则；`docs/architecture.md`：分层边界和门禁说明。
 
 ## 开发规则
 
@@ -35,13 +38,17 @@
 - 每次变更实现并验证后、交付前都更新根目录 `HANDOFF.md`，只保留当前活动的有效上下文、验证证据与剩余事项；长期工作日志另存为新的带日期 `docs/` 文档。面向用户的行为变化同时更新 `README.md`。
 - 保留无关的本地改动。
 - 不启动开发服务器。
+- 新增或移动 Go package 时同步检查 `.harness/architecture/rules.json`。生产与测试源码都必须分类，依赖遵循 `cmd/aiw → commands → aiw → gitcli/localfs`；基础设施和资源层只使用标准库。业务层禁止导入 Cobra，命令层禁止直接导入基础设施。不要通过目录例外或测试豁免绕过边界。
 
 ## 验证
 
 ```bash
+scripts/check-architecture.sh
 go test ./...
 go vet ./...
 scripts/build-release.sh
 ```
+
+`scripts/verify.sh` 按上述顺序运行全部检查。架构门禁覆盖带 build tag 和非本机平台的源码；未知目录、规则冲突和配置错误均阻断。修改规则时同时运行 harness 自测与实际仓库扫描。
 
 `internal/aiw/integration_test.go` 使用临时 Git 仓验证控制面先创建根 worktree、AIW 后物化和关闭的流程。必要时以 `AIW_GIT` 指定可运行的 Git 路径。测试需同时覆盖正常流程、仓库范围变更、重复扫描、未推送与脏 worktree，以及中断恢复。

@@ -4,6 +4,10 @@
 
 ## 当前架构
 
+- 命令层位于 `internal/commands`，由 Cobra 构建，每次 `Run` 新建根命令；root/init/repo/change/agents/doctor/completion 按命令归组。参数校验先于业务执行，帮助不依赖项目或 Git；main 统一输出错误及设置失败退出码。
+- `internal/aiw.Service` 是命令层调用的业务入口，负责项目/Change 上下文、仓库/Change 锁和生命周期递归门禁。项目、选择清单、登记表与执行状态按职责拆文件；业务规则仍在同一 aiw package，业务输出与交互保持原有 stdout/stdin 路径。
+- 依赖方向是 `cmd/aiw → commands → aiw → gitcli/localfs`。`gitcli` 负责系统 Git 调用、输出解析和错误脱敏，`localfs` 负责原子写入与文件锁；两者只依赖标准库。Cobra 只属于命令层，YAML 与内嵌 skill 资源属于业务层。
+- `.harness/architecture` 使用独立 Go module 固定 depguard 开发依赖，规则见其 `rules.json`。`scripts/check-architecture.sh` 先跑门禁自测再扫描全部 Go 源文件；配置、覆盖或依赖错误均阻断。`scripts/verify.sh` 串行执行架构、测试、vet、四平台构建，CI verify 在现有测试前调用同一架构入口。测试没有整体豁免，CLI fixture 的 YAML 依赖单独声明。详细约束见 `docs/architecture.md`。
 - 上层控制面创建 Agent Repo 的 Change worktree、运行 SDD 流程并分发任务。AIW 读取该 worktree 的 `.aiw/change.yaml`，在本机托管的业务仓中创建同名分支与 worktree，并在 `repos/` 下建立符号链接。
 - Agent Repo 的初始 SDD 与跨仓知识由团队自己的提示词和工具维护；它们可以记录候选仓库，但只有 `aiw.yaml` 声明的仓库可被 AIW 物化。
 - Agent Repo 的 `aiw.yaml` 声明可用仓库；业务仓本机注册信息及 Change 执行状态保存在 `AIW_HOME`。物化不隐式 fetch 或 clone，不修改作为注册来源的原 checkout。

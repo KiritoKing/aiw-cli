@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "layers": {
+    "entry": {
+      "files": ["cmd/aiw/*.go"],
+      "allow": ["$gostd", "github.com/KiritoKing/aiw-cli/internal/commands$"]
+    },
+    "commands-production": {
+      "files": ["internal/commands/*.go", "!internal/commands/*_test.go"],
+      "allow": ["$gostd", "github.com/KiritoKing/aiw-cli/internal/aiw$", "github.com/spf13/cobra$"]
+    },
+    "commands-tests": {
+      "files": ["internal/commands/*_test.go"],
+      "allow": ["$gostd", "github.com/KiritoKing/aiw-cli/internal/aiw$", "github.com/spf13/cobra$", "gopkg.in/yaml.v3$"]
+    },
+    "core": {
+      "files": ["internal/aiw/*.go"],
+      "allow": [
+        "$gostd",
+        "github.com/KiritoKing/aiw-cli/internal/gitcli$",
+        "github.com/KiritoKing/aiw-cli/internal/localfs$",
+        "github.com/KiritoKing/aiw-cli/skills$",
+        "gopkg.in/yaml.v3$"
+      ]
+    },
+    "gitcli": {
+      "files": ["internal/gitcli/*.go"],
+      "allow": ["$gostd"]
+    },
+    "localfs": {
+      "files": ["internal/localfs/*.go"],
+      "allow": ["$gostd"]
+    },
+    "skills": {
+      "files": ["skills/*.go"],
+      "allow": ["$gostd"]
+    },
+    "architecture-harness": {
+      "files": [".harness/architecture/*.go"],
+      "allow": [
+        "$gostd",
+        "github.com/OpenPeeDeeP/depguard/v2$",
+        "github.com/gobwas/glob$",
+        "golang.org/x/tools/go/analysis$"
+      ]
+    }
+  }
+}
