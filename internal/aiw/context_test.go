@@ -112,7 +112,7 @@ func TestInitSkipSkills(t *testing.T) {
 	t.Setenv("AIW_GIT", gitPath)
 	t.Setenv("PATH", t.TempDir())
 	root := filepath.Join(t.TempDir(), "agent")
-	if err := runInit([]string{root, "--skip-skills"}); err != nil {
+	if err := (Service{}).Init(root, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
@@ -142,7 +142,7 @@ func TestInitSkipSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chdir(previous)
-	if err := Run([]string{"agents", "sync"}); err != nil {
+	if err := (Service{}).SyncAgents(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -157,23 +157,13 @@ func TestGeneratedBootstrapRejectsIncompleteLockBeforeDownload(t *testing.T) {
 	defer func() { BuildVersion = previousVersion }()
 	t.Setenv("AIW_GIT", gitPath)
 	root := filepath.Join(t.TempDir(), "agent")
-	if err := runInit([]string{root, "--skip-skills"}); err != nil {
+	if err := (Service{}).Init(root, true); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bootstrapPath(root))
 	output, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "AIW_ARTIFACT_BASE_URL is required") {
 		t.Fatalf("bootstrap should reject an incomplete lock before download: %v\n%s", err, output)
-	}
-}
-
-func TestVersionOutput(t *testing.T) {
-	previousVersion := BuildVersion
-	BuildVersion = "v1.2.3"
-	defer func() { BuildVersion = previousVersion }()
-	output := captureStdout(t, func() error { return Run([]string{"version"}) })
-	if string(output) != "v1.2.3\n" {
-		t.Fatalf("unexpected version output: %q", output)
 	}
 }
 
@@ -318,7 +308,7 @@ func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	if err := os.Chdir(f.root); err != nil {
 		t.Fatal(err)
 	}
-	listOutput := captureStdout(t, func() error { return runRepo([]string{"list", "--json"}) })
+	listOutput := captureStdout(t, func() error { return (Service{}).ListRepos(true) })
 	if err := os.Chdir(previous); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/KiritoKing/aiw-cli/internal/localfs"
 )
 
 // BuildVersion is replaced by release builds with the Git tag that produced them.
@@ -137,13 +139,13 @@ func checkToolchainPaths(root string) error {
 }
 
 func writeToolchainFiles(root string) error {
-	if err := atomicWrite(toolchainPath(root), toolchainContents()); err != nil {
+	if err := localfs.AtomicWrite(toolchainPath(root), toolchainContents()); err != nil {
 		return err
 	}
 	if err := os.Chmod(toolchainPath(root), 0644); err != nil {
 		return err
 	}
-	if err := atomicWrite(bootstrapPath(root), []byte(bootstrapScript)); err != nil {
+	if err := localfs.AtomicWrite(bootstrapPath(root), []byte(bootstrapScript)); err != nil {
 		return err
 	}
 	return os.Chmod(bootstrapPath(root), 0755)

@@ -1,4 +1,4 @@
-package aiw
+package gitcli
 
 import (
 	"bytes"
@@ -17,7 +17,9 @@ func gitBin() string {
 	return "git"
 }
 
-func git(dir string, args ...string) (string, error) {
+// Run invokes Git and returns trimmed stdout. Errors retain the operation,
+// wrapped process error, and credential-redacted stderr.
+func Run(dir string, args ...string) (string, error) {
 	cmd := exec.Command(gitBin(), args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -29,54 +31,62 @@ func git(dir string, args ...string) (string, error) {
 		if len(args) > 0 {
 			operation = args[0]
 		}
-		return "", fmt.Errorf("git %s: %w: %s", operation, err, redactCredentials(strings.TrimSpace(stderr.String())))
+		return "", fmt.Errorf("git %s: %w: %s", operation, err, RedactCredentials(strings.TrimSpace(stderr.String())))
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
 var urlCredential = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
 
-func redactCredentials(message string) string {
+// RedactCredentials hides credentials in URL-shaped stderr text.
+func RedactCredentials(message string) string {
 	return urlCredential.ReplaceAllString(message, "${1}[redacted]@")
 }
 
-func gitOk(dir string, args ...string) bool {
-	_, err := git(dir, args...)
+// OK reports whether the Git command succeeds.
+func OK(dir string, args ...string) bool {
+	_, err := Run(dir, args...)
 	return err == nil
 }
 
-func gitRoot(dir string) (string, error) {
-	root, err := git(dir, "rev-parse", "--show-toplevel")
+// Root returns the canonical top-level path of the repository at dir.
+func Root(dir string) (string, error) {
+	root, err := Run(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
 	return filepath.EvalSymlinks(root)
 }
 
-func branch(dir string) (string, error) {
-	b, err := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+// Branch returns the current named branch.
+func Branch(dir string) (string, error) {
+	b, err := Run(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || b == "" {
 		return "", fmt.Errorf("a named branch is required in %s", dir)
 	}
 	return b, nil
 }
 
-func head(dir string) (string, error) { return git(dir, "rev-parse", "HEAD") }
+// Head returns the current commit SHA.
+func Head(dir string) (string, error) { return Run(dir, "rev-parse", "HEAD") }
 
-func refSHA(dir, ref string) (string, error) {
-	return git(dir, "rev-parse", "--verify", ref+"^{commit}")
+// RefSHA resolves ref to a commit SHA.
+func RefSHA(dir, ref string) (string, error) {
+	return Run(dir, "rev-parse", "--verify", ref+"^{commit}")
 }
 
-func gitCommonDir(dir string) (string, error) {
-	p, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+// CommonDir returns the canonical shared Git directory for the repository at dir.
+func CommonDir(dir string) (string, error) {
+	p, err := Run(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
 	return filepath.EvalSymlinks(p)
 }
 
-func assertBranchName(name string) error {
-	if name == "" || !gitOk("", "check-ref-format", "--branch", name) {
+// AssertBranchName reports whether name is a valid Git branch name.
+func AssertBranchName(name string) error {
+	if name == "" || !OK("", "check-ref-format", "--branch", name) {
 		return fmt.Errorf("invalid branch name: %q", name)
 	}
 	return nil
@@ -92,8 +102,9 @@ type GitStatus struct {
 	Behind   string `json:"behind,omitempty"`
 }
 
-func status(dir string) (GitStatus, error) {
-	output, err := git(dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
+// Status reads the current branch, commit, and worktree summary.
+func Status(dir string) (GitStatus, error) {
+	output, err := Run(dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
 	if err != nil {
 		return GitStatus{}, err
 	}
@@ -116,16 +127,18 @@ func status(dir string) (GitStatus, error) {
 	return s, nil
 }
 
-func dirtyDetails(dir string) (string, error) {
-	return git(dir, "status", "--short", "--untracked-files=all", "--ignored")
+// DirtyDetails returns short status lines including untracked and ignored files.
+func DirtyDetails(dir string) (string, error) {
+	return Run(dir, "status", "--short", "--untracked-files=all", "--ignored")
 }
 
-func remoteHead(dir, name string) (string, error) {
-	remote, err := git(dir, "remote", "get-url", "origin")
+// RemoteHead returns the SHA of the named origin branch.
+func RemoteHead(dir, name string) (string, error) {
+	remote, err := Run(dir, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err
 	}
-	out, err := git(dir, "ls-remote", "--heads", remote, "refs/heads/"+name)
+	out, err := Run(dir, "ls-remote", "--heads", remote, "refs/heads/"+name)
 	if err != nil {
 		return "", err
 	}

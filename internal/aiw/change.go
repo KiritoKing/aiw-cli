@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 type ChangeContext struct {
@@ -25,7 +27,7 @@ func currentChange() (ChangeContext, error) {
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	actual, err := gitRoot(root)
+	actual, err := gitcli.Root(root)
 	if err != nil || actual != root {
 		return ChangeContext{}, fmt.Errorf("aiw.yaml must be at the Agent Repo worktree root: %s", root)
 	}
@@ -33,17 +35,17 @@ func currentChange() (ChangeContext, error) {
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	b, err := branch(root)
+	b, err := gitcli.Branch(root)
 	if err != nil {
 		return ChangeContext{}, err
 	}
 	if b == cfg.Base {
 		return ChangeContext{}, fmt.Errorf("run this command in a control-plane-created Change worktree, not the Agent Repo base branch %s", b)
 	}
-	if err := assertBranchName(b); err != nil {
+	if err := gitcli.AssertBranchName(b); err != nil {
 		return ChangeContext{}, err
 	}
-	common, err := gitCommonDir(root)
+	common, err := gitcli.CommonDir(root)
 	if err != nil {
 		return ChangeContext{}, err
 	}
@@ -94,7 +96,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 	if err != nil {
 		return err
 	}
-	tracked, err := git(c.Root, "ls-files", "--", "repos")
+	tracked, err := gitcli.Run(c.Root, "ls-files", "--", "repos")
 	if err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 		return fmt.Errorf("repos/ contains tracked Agent Repo files; remove them from Git before materializing")
 	}
 	for _, name := range spec.Repos {
-		if !gitOk(c.Root, "check-ignore", "--quiet", "--no-index", "repos/"+name) {
+		if !gitcli.OK(c.Root, "check-ignore", "--quiet", "--no-index", "repos/"+name) {
 			return fmt.Errorf("repos/%s is not ignored by the Agent Repo; add /repos/ to .gitignore", name)
 		}
 	}
@@ -146,7 +148,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			} else if !os.IsNotExist(err) {
 				return err
 			}
-			if gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch) && s.Phase != "closed" {
+			if gitcli.OK(store, "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch) && s.Phase != "closed" {
 				return fmt.Errorf("branch %s already exists in repo %s; use change repair if this is an interrupted AIW operation", c.Branch, name)
 			}
 		}
@@ -167,7 +169,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			if err := c.checkOwned(name, old.Path, store); err != nil {
 				return err
 			}
-			dirty, err := dirtyDetails(old.Path)
+			dirty, err := gitcli.DirtyDetails(old.Path)
 			if err != nil {
 				return err
 			}
@@ -196,10 +198,10 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			return err
 		}
 		baseRef := "refs/remotes/origin/" + c.Config.Repos[name].Base
-		existingBranch := gitOk(stores[name], "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch)
+		existingBranch := gitcli.OK(stores[name], "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch)
 		base := s.Repos[name].Base
 		if base == "" || !existingBranch {
-			base, err = refSHA(stores[name], baseRef)
+			base, err = gitcli.RefSHA(stores[name], baseRef)
 			if err != nil {
 				return fmt.Errorf("repo %s has no local baseline; run aiw repo sync %s: %w", name, name, err)
 			}
@@ -211,7 +213,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			}
 			args = []string{"worktree", "add", path, c.Branch}
 		}
-		if _, err := git(stores[name], args...); err != nil {
+		if _, err := gitcli.Run(stores[name], args...); err != nil {
 			return err
 		}
 		s.Repos[name] = RepoState{Path: path, Base: base, Store: stores[name], Setup: "pending"}
@@ -309,7 +311,7 @@ func (c ChangeContext) checkOwned(name, path, store string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("managed worktree path is not a directory: %s", path)
 	}
-	actual, err := gitCommonDir(path)
+	actual, err := gitcli.CommonDir(path)
 	if err != nil {
 		return err
 	}
@@ -317,7 +319,7 @@ func (c ChangeContext) checkOwned(name, path, store string) error {
 	if err != nil || actual != storeReal {
 		return fmt.Errorf("worktree %s is not owned by managed store %s", path, store)
 	}
-	b, err := branch(path)
+	b, err := gitcli.Branch(path)
 	if err != nil || b != c.Branch {
 		return fmt.Errorf("worktree %s is not on expected branch %s", path, c.Branch)
 	}
@@ -341,7 +343,7 @@ func (c ChangeContext) removeWorktree(name, path, store string, discard bool) er
 	if err := c.checkOwned(name, path, store); err != nil {
 		return err
 	}
-	details, err := dirtyDetails(path)
+	details, err := gitcli.DirtyDetails(path)
 	if err != nil {
 		return err
 	}
@@ -353,7 +355,7 @@ func (c ChangeContext) removeWorktree(name, path, store string, discard bool) er
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	if _, err := git(store, args...); err != nil {
+	if _, err := gitcli.Run(store, args...); err != nil {
 		return err
 	}
 	if err := os.Remove(c.linkPath(name)); err != nil && !os.IsNotExist(err) {
@@ -363,16 +365,16 @@ func (c ChangeContext) removeWorktree(name, path, store string, discard bool) er
 }
 
 type StatusRow struct {
-	Repo    string    `json:"repo"`
-	Path    string    `json:"path"`
-	State   GitStatus `json:"git"`
-	BaseSHA string    `json:"baseSha,omitempty"`
-	Drift   bool      `json:"drift"`
-	Active  bool      `json:"active"`
-	Phase   string    `json:"phase,omitempty"`
-	Ready   bool      `json:"ready"`
-	Setup   string    `json:"setup,omitempty"`
-	Cleanup string    `json:"cleanup,omitempty"`
+	Repo    string           `json:"repo"`
+	Path    string           `json:"path"`
+	State   gitcli.GitStatus `json:"git"`
+	BaseSHA string           `json:"baseSha,omitempty"`
+	Drift   bool             `json:"drift"`
+	Active  bool             `json:"active"`
+	Phase   string           `json:"phase,omitempty"`
+	Ready   bool             `json:"ready"`
+	Setup   string           `json:"setup,omitempty"`
+	Cleanup string           `json:"cleanup,omitempty"`
 }
 
 func (c ChangeContext) status(jsonOutput bool) error {
@@ -384,7 +386,7 @@ func (c ChangeContext) status(jsonOutput bool) error {
 	if err != nil {
 		return err
 	}
-	rootStatus, err := status(c.Root)
+	rootStatus, err := gitcli.Status(c.Root)
 	if err != nil {
 		return err
 	}
@@ -404,7 +406,7 @@ func (c ChangeContext) status(jsonOutput bool) error {
 		if p == "" {
 			continue
 		}
-		gitState, err := status(p)
+		gitState, err := gitcli.Status(p)
 		if err != nil {
 			return fmt.Errorf("repo %s: %w", name, err)
 		}
@@ -511,10 +513,10 @@ func (c ChangeContext) selectRepos(names []string) error {
 	if string(previous) == string(current) {
 		return nil
 	}
-	if _, err := git(c.Root, "add", "--", ".aiw/change.yaml"); err != nil {
+	if _, err := gitcli.Run(c.Root, "add", "--", ".aiw/change.yaml"); err != nil {
 		return err
 	}
-	if _, err := git(c.Root, "commit", "-m", "aiw: update repository selection", "--only", "--", ".aiw/change.yaml"); err != nil {
+	if _, err := gitcli.Run(c.Root, "commit", "-m", "aiw: update repository selection", "--only", "--", ".aiw/change.yaml"); err != nil {
 		return err
 	}
 	return nil
@@ -557,7 +559,7 @@ func (c ChangeContext) repair() error {
 		if err != nil {
 			return err
 		}
-		actual, err := gitCommonDir(path)
+		actual, err := gitcli.CommonDir(path)
 		if err != nil {
 			return err
 		}
@@ -565,13 +567,13 @@ func (c ChangeContext) repair() error {
 		if err != nil || actual != storeReal {
 			return fmt.Errorf("cannot adopt worktree %s: store mismatch", path)
 		}
-		b, err := branch(path)
+		b, err := gitcli.Branch(path)
 		if err != nil || b != c.Branch {
 			return fmt.Errorf("cannot adopt worktree %s: branch mismatch", path)
 		}
 		base := s.Repos[name].Base
 		if base == "" {
-			base, _ = refSHA(store, "refs/remotes/origin/"+c.Config.Repos[name].Base)
+			base, _ = gitcli.RefSHA(store, "refs/remotes/origin/"+c.Config.Repos[name].Base)
 		}
 		s.Repos[name] = RepoState{Path: path, Base: base, Store: store}
 		if err := saveState(c.Home, s); err != nil {

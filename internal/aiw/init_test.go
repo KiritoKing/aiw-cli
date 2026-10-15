@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 func TestInitExistingRepoThroughSymlink(t *testing.T) {
-	if _, err := git("", "--version"); err != nil {
+	if _, err := gitcli.Run("", "--version"); err != nil {
 		t.Skipf("Git unavailable: %v", err)
 	}
 	base := t.TempDir()
@@ -20,10 +22,10 @@ func TestInitExistingRepoThroughSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	realRepo := filepath.Join(realDir, "agent")
-	if _, err := git("", "init", "-b", "main", realRepo); err != nil {
+	if _, err := gitcli.Run("", "init", "-b", "main", realRepo); err != nil {
 		t.Fatal(err)
 	}
-	if err := runInit([]string{filepath.Join(alias, "agent"), "--skip-skills"}); err != nil {
+	if err := (Service{}).Init(filepath.Join(alias, "agent"), true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(realRepo, "aiw.yaml")); err != nil {

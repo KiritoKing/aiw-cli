@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 // Lifecycle commands come from the committed Agent Repo baseline, not a Change edit.
 func (c ChangeContext) lifecycleConfig() (ProjectConfig, error) {
-	data, err := git(c.Root, "show", "refs/heads/"+c.Config.Base+":aiw.yaml")
+	data, err := gitcli.Run(c.Root, "show", "refs/heads/"+c.Config.Base+":aiw.yaml")
 	if err != nil {
 		return ProjectConfig{}, fmt.Errorf("read committed baseline aiw.yaml: %w", err)
 	}

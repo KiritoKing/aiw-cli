@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 func registerRepo(root, home, name, source string) error {
@@ -22,11 +24,11 @@ func registerRepo(root, home, name, source string) error {
 	if err != nil {
 		return err
 	}
-	source, err = gitRoot(source)
+	source, err = gitcli.Root(source)
 	if err != nil {
 		return fmt.Errorf("source %s: %w", source, err)
 	}
-	remote, err := git(source, "remote", "get-url", "origin")
+	remote, err := gitcli.Run(source, "remote", "get-url", "origin")
 	if err != nil {
 		return fmt.Errorf("source %s has no origin remote: %w", source, err)
 	}
@@ -39,7 +41,7 @@ func registerRepo(root, home, name, source string) error {
 		return err
 	}
 	if old, exists := registry.Repos[key]; exists {
-		if !gitOk(old.Store, "rev-parse", "--is-bare-repository") {
+		if !gitcli.OK(old.Store, "rev-parse", "--is-bare-repository") {
 			return fmt.Errorf("registered store is unavailable: %s", old.Store)
 		}
 		fmt.Printf("reused %s: %s\n", name, old.Store)
@@ -47,8 +49,8 @@ func registerRepo(root, home, name, source string) error {
 	}
 	store := filepath.Join(home, "repos", hash(key)+".git")
 	if _, err := os.Lstat(store); err == nil {
-		bare, bareErr := git(store, "rev-parse", "--is-bare-repository")
-		storedRemote, remoteErr := git(store, "remote", "get-url", "origin")
+		bare, bareErr := gitcli.Run(store, "rev-parse", "--is-bare-repository")
+		storedRemote, remoteErr := gitcli.Run(store, "remote", "get-url", "origin")
 		if bareErr != nil || remoteErr != nil || bare != "true" || canonicalRemote(storedRemote) != key {
 			return fmt.Errorf("unregistered store path already exists and cannot be adopted: %s", store)
 		}
@@ -64,20 +66,20 @@ func registerRepo(root, home, name, source string) error {
 	if err := os.MkdirAll(filepath.Dir(store), 0755); err != nil {
 		return err
 	}
-	if _, err := git("", "clone", "--bare", "--local", source, store); err != nil {
+	if _, err := gitcli.Run("", "clone", "--bare", "--local", source, store); err != nil {
 		return err
 	}
-	if _, err := git(store, "remote", "set-url", "origin", repo.Remote); err != nil {
+	if _, err := gitcli.Run(store, "remote", "set-url", "origin", repo.Remote); err != nil {
 		return err
 	}
 	baseRef := "refs/remotes/origin/" + repo.Base
-	if !gitOk(source, "rev-parse", "--verify", baseRef+"^{commit}") {
+	if !gitcli.OK(source, "rev-parse", "--verify", baseRef+"^{commit}") {
 		baseRef = "refs/heads/" + repo.Base
 	}
-	if !gitOk(source, "rev-parse", "--verify", baseRef+"^{commit}") {
+	if !gitcli.OK(source, "rev-parse", "--verify", baseRef+"^{commit}") {
 		return fmt.Errorf("source %s has no local baseline for %s; fetch it in the source or use aiw repo sync after registration", source, repo.Base)
 	}
-	if _, err := git(store, "fetch", "--no-tags", source, "+"+baseRef+":refs/remotes/origin/"+repo.Base); err != nil {
+	if _, err := gitcli.Run(store, "fetch", "--no-tags", source, "+"+baseRef+":refs/remotes/origin/"+repo.Base); err != nil {
 		return err
 	}
 	registry.Repos[key] = RegistryEntry{Remote: repo.Remote, Source: source, Store: store}
@@ -97,7 +99,7 @@ func storeFor(cfg ProjectConfig, registry Registry, name string) (string, error)
 	if !ok {
 		return "", fmt.Errorf("repo %s is not registered; run aiw repo register or aiw repo scan", name)
 	}
-	bare, err := git(entry.Store, "rev-parse", "--is-bare-repository")
+	bare, err := gitcli.Run(entry.Store, "rev-parse", "--is-bare-repository")
 	if err != nil || bare != "true" {
 		return "", fmt.Errorf("invalid managed store for %s: %s", name, entry.Store)
 	}
@@ -128,11 +130,11 @@ func syncRepo(root, home, name string) error {
 			return err
 		}
 		base := cfg.Repos[item].Base
-		_, err = git(store, "fetch", "origin", "+refs/heads/"+base+":refs/remotes/origin/"+base)
+		_, err = gitcli.Run(store, "fetch", "origin", "+refs/heads/"+base+":refs/remotes/origin/"+base)
 		if err != nil {
 			return err
 		}
-		sha, err := refSHA(store, "refs/remotes/origin/"+base)
+		sha, err := gitcli.RefSHA(store, "refs/remotes/origin/"+base)
 		if err != nil {
 			return err
 		}
@@ -171,7 +173,7 @@ func scanRepos(root, home, scanRoot string) error {
 			return filepath.SkipDir
 		}
 		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
-			remote, err := git(path, "remote", "get-url", "origin")
+			remote, err := gitcli.Run(path, "remote", "get-url", "origin")
 			if err == nil {
 				matches[canonicalRemote(remote)] = append(matches[canonicalRemote(remote)], path)
 			}

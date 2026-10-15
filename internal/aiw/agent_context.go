@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/KiritoKing/aiw-cli/internal/localfs"
 )
 
 const (
@@ -21,10 +23,7 @@ const (
 - Inspect local changes before removing a repo or closing a Change. The control plane removes the root worktree only after aiw change close succeeds.`
 )
 
-func runAgents(args []string) error {
-	if len(args) != 1 || args[0] != "sync" {
-		return fmt.Errorf("usage: aiw agents sync")
-	}
+func syncCurrentAgentInstructions() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -63,7 +62,7 @@ func syncAgentInstructions(root string) error {
 	if bytes.Equal(original, updated) && info != nil {
 		return nil
 	}
-	if err := atomicWrite(path, updated); err != nil {
+	if err := localfs.AtomicWrite(path, updated); err != nil {
 		return err
 	}
 	if info != nil {

@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 type CloseOptions struct {
@@ -73,19 +75,19 @@ func (c ChangeContext) close(options CloseOptions) error {
 		checks = append(checks, closeCheck{Name: name, Path: entry.Path, Store: store})
 	}
 	for i := range checks {
-		local, err := head(checks[i].Path)
+		local, err := gitcli.Head(checks[i].Path)
 		if err != nil {
 			checks[i].Unpushed = "local HEAD unavailable: " + err.Error()
 			continue
 		}
-		remote, err := remoteHead(checks[i].Path, c.Branch)
+		remote, err := gitcli.RemoteHead(checks[i].Path, c.Branch)
 		if err != nil {
 			checks[i].Unpushed = err.Error()
 		} else if remote != local {
 			checks[i].Unpushed = fmt.Sprintf("local %s differs from remote %s", local, remote)
 		}
 		if checks[i].Name != "agent-repo" {
-			checks[i].Dirty, err = dirtyDetails(checks[i].Path)
+			checks[i].Dirty, err = gitcli.DirtyDetails(checks[i].Path)
 			if err != nil {
 				return err
 			}
@@ -121,10 +123,10 @@ func (c ChangeContext) close(options CloseOptions) error {
 			return fmt.Errorf("close stopped at %s; worktree remains: %w", check.Name, err)
 		}
 		unpushedAfterCleanup := ""
-		local, err := head(check.Path)
+		local, err := gitcli.Head(check.Path)
 		if err != nil {
 			unpushedAfterCleanup = "local HEAD unavailable: " + err.Error()
-		} else if remote, err := remoteHead(check.Path, c.Branch); err != nil {
+		} else if remote, err := gitcli.RemoteHead(check.Path, c.Branch); err != nil {
 			unpushedAfterCleanup = err.Error()
 		} else if remote != local {
 			unpushedAfterCleanup = fmt.Sprintf("local %s differs from remote %s", local, remote)
@@ -135,7 +137,7 @@ func (c ChangeContext) close(options CloseOptions) error {
 				return err
 			}
 		}
-		afterCleanup, err := dirtyDetails(check.Path)
+		afterCleanup, err := gitcli.DirtyDetails(check.Path)
 		if err != nil {
 			return err
 		}

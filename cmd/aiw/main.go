@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/KiritoKing/aiw-cli/internal/aiw"
+	"github.com/KiritoKing/aiw-cli/internal/commands"
 )
 
 func main() {
-	if err := aiw.Run(os.Args[1:]); err != nil {
+	if err := commands.Run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "aiw:", err)
 		os.Exit(1)
 	}

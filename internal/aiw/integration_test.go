@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/KiritoKing/aiw-cli/internal/gitcli"
 )
 
 type fixture struct {
@@ -19,7 +21,7 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	if _, err := git("", "--version"); err != nil {
+	if _, err := gitcli.Run("", "--version"); err != nil {
 		t.Skipf("Git unavailable: %v", err)
 	}
 	base, err := os.MkdirTemp("/private/tmp", "aiw-test-")
@@ -30,7 +32,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Setenv("AIW_HOME", filepath.Join(base, "aiw-home"))
 	f := &fixture{t: t, base: base, root: filepath.Join(base, "agent"), change: filepath.Join(base, "change"), source: map[string]string{}, remote: map[string]string{}}
-	f.mustRun(Run([]string{"init", f.root, "--skip-skills"}))
+	f.mustRun((Service{}).Init(f.root, true))
 	f.configure(f.root)
 	f.remote["agent"] = filepath.Join(base, "agent-remote.git")
 	f.mustGit("", "init", "--bare", f.remote["agent"])
@@ -64,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) mustGit(dir string, args ...string) string {
 	f.t.Helper()
-	out, err := git(dir, args...)
+	out, err := gitcli.Run(dir, args...)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -152,7 +154,7 @@ func TestExternalWorktreeMaterializeAndReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/feat/integration") {
+	if !gitcli.OK(store, "show-ref", "--verify", "--quiet", "refs/heads/feat/integration") {
 		t.Fatal("removing a worktree should preserve its branch")
 	}
 	f.spec("api", "web")

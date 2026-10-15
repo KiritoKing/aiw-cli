@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KiritoKing/aiw-cli/internal/localfs"
 	aiwskills "github.com/KiritoKing/aiw-cli/skills"
 )
 
@@ -126,7 +127,7 @@ func installBundledSkills(root string) error {
 		} else if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		if err := atomicWrite(file.path, file.data); err != nil {
+		if err := localfs.AtomicWrite(file.path, file.data); err != nil {
 			return fmt.Errorf("install %s: %w", strings.TrimPrefix(file.path, root+string(filepath.Separator)), err)
 		}
 	}
