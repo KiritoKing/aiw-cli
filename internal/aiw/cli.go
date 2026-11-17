@@ -26,6 +26,8 @@ func Run(args []string) error {
 		return nil
 	case "agents":
 		return runAgents(args[1:])
+	case "workspace":
+		return runWorkspace(args[1:])
 	case "doctor":
 		return runDoctor()
 	case "repo":
@@ -46,6 +48,7 @@ Usage:
   aiw init <agent-repo-path> [--skip-skills]
   aiw version
   aiw agents sync
+  aiw workspace sync
   aiw doctor
   aiw repo list [--json] | register <name> --source <path> | scan <dir> | sync [name]
   aiw change select --repo <name> [--repo <name>...]
@@ -145,12 +148,45 @@ func runInit(args []string) error {
 	if err := writeToolchainFiles(path); err != nil {
 		return err
 	}
+	if err := autoSyncVSCodeWorkspace(path, cfg); err != nil {
+		return err
+	}
 	if !skipSkills {
 		if err := installSkills(path); err != nil {
 			return fmt.Errorf("Agent Repo initialized at %s, but skill installation failed: %w; install skills separately or use your own installer", path, err)
 		}
 	}
 	fmt.Printf("initialized %s; edit aiw.yaml, then commit it in the Agent Repo\n", path)
+	return nil
+}
+
+func runWorkspace(args []string) error {
+	if len(args) != 1 || args[0] != "sync" {
+		return fmt.Errorf("usage: aiw workspace sync")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	root, err := projectRoot(cwd)
+	if err != nil {
+		return err
+	}
+	actual, err := gitRoot(root)
+	if err != nil {
+		return err
+	}
+	if actual != root {
+		return fmt.Errorf("aiw.yaml must be at the Agent Repo worktree root: %s", root)
+	}
+	cfg, err := loadProject(root)
+	if err != nil {
+		return err
+	}
+	if err := syncVSCodeWorkspace(root, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("synced %s\n", filepath.Join(root, vscodeWorkspaceFile))
 	return nil
 }
 

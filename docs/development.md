@@ -11,6 +11,7 @@
 - 每次物化在结构调整完成后执行选中仓库的 setup；全部成功才就绪。仓库移出范围或 `change close` 释放业务 worktree 前执行 cleanup。脚本定义取自 Agent Repo 基线分支已提交的 `aiw.yaml`。
 - `change close` 由控制面的 cleanup script 调用。它负责业务 worktree 的检查和释放；只有成功后，控制面才能移除根 worktree。AIW 不接管根 worktree、SDD、Agent 或代码交付流程。
 - `init` 维护根仓 `AGENTS.md` 中由 AIW 标记的协作规则，生成 `.aiw/aiw-toolchain.env` 和 `.aiw/bootstrap-aiw.sh`，默认通过社区 `npx skills add` 安装 AIW skills；无 Node/npx 时仅用内置 Go 副本补齐缺失文件。版本锁必须由团队填写制品地址和 Release 校验和后提交；bootstrap 在校验完成前不下载。已有仓库使用 `agents sync` 更新标记区块；skill 后续升级由社区工具或用户工具负责。
+- `internal/aiw/vscode_workspace.go` 按当前 worktree 的 `aiw.yaml` 生成根目录 `aiw.code-workspace`，包含根仓和全部配置子仓的相对路径；不按 Change 选择过滤，不读取原 checkout 路径。`init`、`materialize`/`repair` 的协调流程默认同步，`vscode.autoSync: false` 仅关闭自动入口；`workspace sync` 显式整份覆盖。输出通过本机 Git `info/exclude` 精确忽略，更新共用锁保护的 exclude 时保留原内容，不改变 `.gitignore`、业务 worktree 和 Change 状态格式。
 - `repo list --json` 和 `change status --json` 向控制面提供本机登记、业务仓分支与创建基线 SHA。根仓 Git 不追踪 `repos/` 链接内的业务改动；业务仓的 diff、提交、push、MR 均由各仓自身工具处理。
 - `.github/workflows/ci.yml` 在 PR/master 上验证 Go 测试、vet 和四个平台的交叉编译；只有 `v*` tag 会创建 GitHub Release，并附带版本化归档和 SHA-256 清单。内部制品库应镜像这些不可变制品，不能由该公开工作流推断或管理。
 

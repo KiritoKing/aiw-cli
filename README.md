@@ -8,6 +8,7 @@ AIW 是一个 Go CLI，用于把多个业务仓库的 Git worktree 组装到 **A
 Agent Repo（持久 Git 仓库，含 aiw.yaml）
   └─ Change worktree（由上层控制面创建）
        ├─ .aiw/change.yaml（Propose 阶段确定业务仓范围）
+       ├─ aiw.code-workspace（自动生成的 VS Code 多仓工作区）
        └─ repos/
             ├─ web -> AIW 管理的 web worktree
             └─ api -> AIW 管理的 api worktree
@@ -87,6 +88,29 @@ repos:
 每仓的 `setup`、`cleanup` 可选，命令及参数从 Agent Repo **基线分支已提交的** `aiw.yaml` 读取。命令在对应业务仓 worktree 内直接执行，不经过 shell；相对脚本路径相对该业务仓。执行时提供 `AIW_CHANGE_ROOT`、`AIW_CHANGE_BRANCH`、`AIW_REPO_NAME`、`AIW_REPO_PATH` 和 `AIW_LIFECYCLE_ACTION` 环境变量。脚本应支持重试；逐仓脚本不可递归调用 AIW Change 命令。
 
 根仓的 SDD 或知识初始化由团队自己的提示词、Agent 和工具完成：它可以整理跨仓职责、候选仓库和需求上下文，再在本次 Change 的方案中确定要物化的仓库。`aiw.yaml` 仍只列可物化仓库；AIW 不要求 OpenSpec，也不替团队生成业务知识。
+
+## VS Code 多仓工作区
+
+`init`、`change materialize` 和 `change repair` 的物化协调流程默认在当前 Agent Repo 根目录生成或更新 `aiw.code-workspace`，方便同时阅览根仓和业务仓。文件包含根仓 `.`，以及当前 `aiw.yaml` 中全部业务仓的 `repos/<name>` 相对路径，按仓库名排序。它不按 `.aiw/change.yaml` 筛选；未物化的业务仓仍有目录项，实际代码需要先物化。
+
+修改 `aiw.yaml` 后，可在 Agent Repo 根目录或其子目录手动同步；主分支和 Change worktree 都可使用：
+
+```bash
+aiw workspace sync
+```
+
+随后在 VS Code 打开生成的文件，或在 Agent Repo 根目录执行 `code aiw.code-workspace`。
+
+自动同步默认开启，无需修改旧配置。要关闭自动更新，在 `aiw.yaml` 中加入：
+
+```yaml
+vscode:
+  autoSync: false
+```
+
+关闭后保留已有文件，显式执行 `aiw workspace sync` 仍会更新。每次同步都整份覆盖固定的 `aiw.code-workspace`，包括移除旧目录项和自定义 settings/tasks；要自行维护编辑器设置，请使用其他名称的 workspace 文件。目标为符号链接或非普通文件时拒绝覆盖。
+
+生成文件通过 Agent Repo 的本机 Git `info/exclude` 忽略，已有排除规则会保留，已提交的 `.gitignore` 不变；已经被 Git 跟踪的同名文件仍由 Git 跟踪。生成不需要 VS Code、业务仓登记或 Change 选择清单，也不会自动打开编辑器、创建业务仓或监听配置变化。自动同步失败时命令会报错，修复目标路径后可重试，或关闭自动同步。
 
 ## 登记已有业务仓
 

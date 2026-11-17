@@ -5,7 +5,7 @@ _aiw_completion() {
   COMPREPLY=()
 
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=( $(compgen -W 'init agents doctor repo change completion help' -- "$current") )
+    COMPREPLY=( $(compgen -W 'init agents workspace doctor repo change completion help' -- "$current") )
     return
   fi
 
@@ -18,6 +18,9 @@ _aiw_completion() {
       fi
       ;;
     agents)
+      (( COMP_CWORD == 2 )) && COMPREPLY=( $(compgen -W 'sync' -- "$current") )
+      ;;
+    workspace)
       (( COMP_CWORD == 2 )) && COMPREPLY=( $(compgen -W 'sync' -- "$current") )
       ;;
     completion)

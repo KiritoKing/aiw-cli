@@ -176,6 +176,9 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			}
 		}
 	}
+	if err := autoSyncVSCodeWorkspace(c.Root, c.Config); err != nil {
+		return err
+	}
 	s.Phase = "materializing"
 	if err := saveState(c.Home, s); err != nil {
 		return err
