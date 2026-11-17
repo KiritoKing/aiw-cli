@@ -4,7 +4,7 @@ _aiw() {
   local -a commands
 
   if (( CURRENT == 2 )); then
-    commands=(init agents doctor repo change completion help)
+    commands=(init agents workspace doctor repo change completion help)
     compadd -- $commands
     return
   fi
@@ -19,6 +19,9 @@ _aiw() {
       fi
       ;;
     agents)
+      (( CURRENT == 3 )) && compadd -- sync
+      ;;
+    workspace)
       (( CURRENT == 3 )) && compadd -- sync
       ;;
     completion)

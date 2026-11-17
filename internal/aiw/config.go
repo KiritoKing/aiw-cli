@@ -32,6 +32,11 @@ type ProjectConfig struct {
 	Name    string                `yaml:"name"`
 	Base    string                `yaml:"base"`
 	Repos   map[string]RepoConfig `yaml:"repos"`
+	VSCode  VSCodeConfig          `yaml:"vscode,omitempty"`
+}
+
+type VSCodeConfig struct {
+	AutoSync *bool `yaml:"autoSync,omitempty"`
 }
 
 type ChangeSpec struct {
