@@ -17,9 +17,28 @@ type fixture struct {
 	remote map[string]string
 }
 
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	config := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(config, []byte(`[user]
+	name = AIW Test
+	email = aiw-test@example.com
+[commit]
+	gpgsign = false
+[core]
+	fsmonitor = false
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+}
+
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	if _, err := git("", "--version"); err != nil {
+	isolateGitConfig(t)
+	if _, err := testEnv().git("", "--version"); err != nil {
 		t.Skipf("Git unavailable: %v", err)
 	}
 	base, err := os.MkdirTemp("/private/tmp", "aiw-test-")
@@ -64,7 +83,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) mustGit(dir string, args ...string) string {
 	f.t.Helper()
-	out, err := git(dir, args...)
+	out, err := testEnv().git(dir, args...)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -97,7 +116,7 @@ func (f *fixture) context() ChangeContext {
 		f.t.Fatal(err)
 	}
 	f.t.Cleanup(func() { os.Chdir(previous) })
-	c, err := currentChange()
+	c, err := testEnv().currentChange()
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -113,7 +132,7 @@ func (f *fixture) spec(repos ...string) {
 
 func TestExternalWorktreeMaterializeAndReconcile(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	f.mustRun(testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
 	f.checkout()
 	c := f.context()
 	if _, err := os.Lstat(c.linkPath("web")); !os.IsNotExist(err) {
@@ -148,11 +167,11 @@ func TestExternalWorktreeMaterializeAndReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := storeFor(c.Config, registry, "web")
+	store, err := testEnv().storeFor(c.Config, registry, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/feat/integration") {
+	if !testEnv().gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/feat/integration") {
 		t.Fatal("removing a worktree should preserve its branch")
 	}
 	f.spec("api", "web")
@@ -160,7 +179,7 @@ func TestExternalWorktreeMaterializeAndReconcile(t *testing.T) {
 	if _, err := os.Readlink(c.linkPath("web")); err != nil {
 		t.Fatalf("previously removed repo could not be rematerialized: %v", err)
 	}
-	f.mustRun(c.status(true))
+	f.mustRun(Run([]string{"change", "status", "--json"}))
 	f.mustGit(c.Root, "add", ".aiw/change.yaml")
 	f.mustGit(c.Root, "commit", "-m", "selection")
 	f.mustGit(c.Root, "push", "-u", "origin", c.Branch)
@@ -175,7 +194,7 @@ func TestExternalWorktreeMaterializeAndReconcile(t *testing.T) {
 
 func TestCloseRequiresExplicitRiskFlags(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -202,7 +221,7 @@ func TestScanDuplicateMatchDoesNotRegister(t *testing.T) {
 	f := newFixture(t)
 	copyPath := filepath.Join(f.base, "other-web")
 	f.mustGit("", "clone", f.remote["web"], copyPath)
-	if err := scanRepos(f.root, os.Getenv("AIW_HOME"), f.base); err == nil || !strings.Contains(err.Error(), "multiple local checkouts") {
+	if err := testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base); err == nil || !strings.Contains(err.Error(), "multiple local checkouts") {
 		t.Fatalf("expected duplicate scan error, got %v", err)
 	}
 	registry, err := loadRegistry(os.Getenv("AIW_HOME"))
@@ -217,7 +236,7 @@ func TestScanDuplicateMatchDoesNotRegister(t *testing.T) {
 func TestScanStopsAtRepositoryBoundary(t *testing.T) {
 	f := newFixture(t)
 	f.mustGit("", "clone", f.remote["web"], filepath.Join(f.source["web"], "nested-web"))
-	f.mustRun(scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	f.mustRun(testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
 	registry, err := loadRegistry(os.Getenv("AIW_HOME"))
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +268,7 @@ func TestSelectCommitsOnlyAIWManifestWithoutMaterializing(t *testing.T) {
 
 func TestRepairAdoptsInterruptedGitWorktree(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -263,7 +282,7 @@ func TestRepairAdoptsInterruptedGitWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := storeFor(c.Config, registry, "web")
+	store, err := testEnv().storeFor(c.Config, registry, "web")
 	if err != nil {
 		t.Fatal(err)
 	}

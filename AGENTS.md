@@ -13,24 +13,25 @@
 
 ## 实现位置
 
-- `cmd/aiw/main.go`：CLI 入口。
-- `internal/aiw/cli.go`：命令路由。
+- `cmd/aiw/main.go`：CLI 入口，把终端中断和终止信号传入执行上下文。
+- `internal/aiw/cli.go`、`runtime.go`、`completion.go`：Cobra 命令树、调用目录和 I/O，以及动态补全。
+- `internal/aiw/project_commands.go`、`repo_commands.go`、`change_index.go`：项目命令、仓库列表和本机 Change 索引。
+- `internal/aiw/terminal.go`、`doctor.go`：TTY 检测、表格与交互、结构化体检。
 - `internal/aiw/config.go`：项目清单、Change 选择清单和本机状态。
 - `internal/aiw/store.go`：本地仓登记、扫描和显式同步。
 - `internal/aiw/change.go`、`close.go`：业务 worktree 物化、状态、修复和释放。
-- `internal/aiw/lifecycle.go`：基线脚本定义、逐仓 setup/cleanup 及执行状态。
-- `internal/aiw/git.go`：通过系统 Git CLI 执行 Git 操作。
+- `internal/aiw/lifecycle.go`：工作区生命周期配置、逐仓 setup/cleanup、释放回退与执行状态。
+- `internal/aiw/git.go`、`lock.go`：可取消的系统 Git CLI 调用、脱敏诊断和文件锁。
 - `internal/aiw/agent_context.go`、`skill_install.go`：托管区块同步及默认/兜底 skill 安装。
-- `internal/aiw/completions/`：zsh、bash 补全脚本。
 - `docs/development.md`：现行开发上下文和变更文档约定；`HANDOFF.md`：当前活动交接。
 
 ## 开发规则
 
-- 使用 Go 1.22+；首版目标平台为 macOS 和 Linux。保持依赖少，不用 Go 库重写 Git 语义。
+- 使用 Go 1.22+；首版目标平台为 macOS 和 Linux。Cobra 提供命令树和补全，Lipgloss/Huh 提供终端呈现和交互，gofrs/flock 提供可取消文件锁，x/term 检测终端。Git 语义由系统 Git 提供。
 - 创建业务 worktree 前核对清单、注册表、基线和分支冲突。删除前核对登记路径、Git common dir 和分支；有本地数据时按 CLI 风险确认处理。
 - 不在物化过程中隐式 fetch、clone、push 或提交外部流程写入的 `.aiw/change.yaml`。AIW 自己修改选择清单时只提交该文件。
 - 更新 Agent Repo 规则时只替换完整的 `<!-- aiw:start -->` / `<!-- aiw:end -->` 区块，保护区块外字节；兜底 skill 安装不覆盖已有不同内容的文件。
-- 逐仓 setup/cleanup 命令取自基线分支已提交的 `aiw.yaml`，在业务仓 worktree 中执行。持久化脚本状态；脚本中不得递归调用 AIW Change 命令。`repair` 不自动重放结果未知的脚本。
+- 逐仓 setup/cleanup 命令优先读取当前工作区的 `aiw.yaml`，在业务仓 worktree 中执行。持久化脚本状态和 cleanup 定义。删除配置项后，用已登记的 Store 校验归属，并按状态快照或历史配置恢复 cleanup。脚本中不得递归调用 AIW Change 命令。`repair` 不自动重放结果未知的脚本。
 - 重大变更开始实现前，先在 `docs/` 新建带日期的设计记录，说明现状、目标、影响范围、兼容或迁移方式、数据安全边界和验收方法；产品边界、CLI 契约、持久化格式、worktree 生命周期或失败恢复语义变化都适用。现行架构有变化时同步更新 `docs/development.md`。已有日期的历史记录不回写。
 - 每次变更实现并验证后、交付前都更新根目录 `HANDOFF.md`，只保留当前活动的有效上下文、验证证据与剩余事项；长期工作日志另存为新的带日期 `docs/` 文档。面向用户的行为变化同时更新 `README.md`。
 - 保留无关的本地改动。

@@ -11,11 +11,12 @@ import (
 
 func newVSCodeTestRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := git("", "--version"); err != nil {
+	isolateGitConfig(t)
+	if _, err := testEnv().git("", "--version"); err != nil {
 		t.Skipf("Git unavailable: %v", err)
 	}
 	root := filepath.Join(t.TempDir(), "agent")
-	if _, err := git("", "init", "--quiet", root); err != nil {
+	if _, err := testEnv().git("", "init", "--quiet", root); err != nil {
 		t.Fatal(err)
 	}
 	return root
@@ -23,7 +24,7 @@ func newVSCodeTestRepo(t *testing.T) string {
 
 func vscodeTestExcludePath(t *testing.T, root string) string {
 	t.Helper()
-	path, err := git(root, "rev-parse", "--git-path", "info/exclude")
+	path, err := testEnv().git(root, "rev-parse", "--git-path", "info/exclude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestSyncVSCodeWorkspaceUsesAllConfiguredReposInStableOrder(t *testing.T) {
 			"alpha": {},
 		},
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err != nil {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err != nil {
 		t.Fatal(err)
 	}
 	data, workspace := readVSCodeWorkspace(t, root)
@@ -98,7 +99,7 @@ func TestSyncVSCodeWorkspaceEmptyReposAndReplacesWholeFile(t *testing.T) {
 	if err := os.WriteFile(path, old, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, ProjectConfig{Name: "empty-project", Repos: map[string]RepoConfig{}}); err != nil {
+	if err := testEnv().syncVSCodeWorkspace(root, ProjectConfig{Name: "empty-project", Repos: map[string]RepoConfig{}}); err != nil {
 		t.Fatal(err)
 	}
 	data, workspace := readVSCodeWorkspace(t, root)
@@ -114,7 +115,7 @@ func TestSyncVSCodeWorkspaceEmptyReposAndReplacesWholeFile(t *testing.T) {
 func TestAutoSyncVSCodeWorkspaceDefaultsOnAndFalseSkipsEverything(t *testing.T) {
 	root := newVSCodeTestRepo(t)
 	cfg := ProjectConfig{Name: "default-on", Repos: map[string]RepoConfig{}}
-	if err := autoSyncVSCodeWorkspace(root, cfg); err != nil {
+	if err := testEnv().autoSyncVSCodeWorkspace(root, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, vscodeWorkspaceFile)); err != nil {
@@ -132,7 +133,7 @@ func TestAutoSyncVSCodeWorkspaceDefaultsOnAndFalseSkipsEverything(t *testing.T) 
 	}
 	falseValue := false
 	cfg.VSCode.AutoSync = &falseValue
-	if err := autoSyncVSCodeWorkspace(plainRoot, cfg); err != nil {
+	if err := testEnv().autoSyncVSCodeWorkspace(plainRoot, cfg); err != nil {
 		t.Fatalf("disabled auto-sync should skip even outside a Git repo: %v", err)
 	}
 	got, err := os.ReadFile(workspacePath)
@@ -152,7 +153,7 @@ func TestSyncVSCodeWorkspacePreservesExcludeBytesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := ProjectConfig{Name: "project", Repos: map[string]RepoConfig{}}
-	if err := syncVSCodeWorkspace(root, cfg); err != nil {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err != nil {
 		t.Fatal(err)
 	}
 	first, err := os.ReadFile(excludePath)
@@ -163,7 +164,7 @@ func TestSyncVSCodeWorkspacePreservesExcludeBytesAndIsIdempotent(t *testing.T) {
 	if !bytes.Equal(first, want) {
 		t.Fatalf("exclude bytes changed unexpectedly:\n got %q\nwant %q", first, want)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err != nil {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err != nil {
 		t.Fatal(err)
 	}
 	second, err := os.ReadFile(excludePath)
@@ -188,7 +189,7 @@ func TestSyncVSCodeWorkspaceRejectsUnsafeTargets(t *testing.T) {
 	if err := os.Symlink(outside, workspacePath); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "workspace") {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("workspace symlink should be rejected with context: %v", err)
 	}
 	if got, err := os.ReadFile(outside); err != nil || !bytes.Equal(got, outsideContent) {
@@ -200,7 +201,7 @@ func TestSyncVSCodeWorkspaceRejectsUnsafeTargets(t *testing.T) {
 	if err := os.Mkdir(workspacePath, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "workspace") {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("workspace directory should be rejected with context: %v", err)
 	}
 	if err := os.Remove(workspacePath); err != nil {
@@ -215,7 +216,7 @@ func TestSyncVSCodeWorkspaceRejectsUnsafeTargets(t *testing.T) {
 	if err := os.Symlink(outside, excludePath); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "exclude") {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "exclude") {
 		t.Fatalf("exclude symlink should be rejected with context: %v", err)
 	}
 	if got, err := os.ReadFile(outside); err != nil || !bytes.Equal(got, outsideContent) {
@@ -227,7 +228,7 @@ func TestSyncVSCodeWorkspaceRejectsUnsafeTargets(t *testing.T) {
 	if err := os.Mkdir(excludePath, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "exclude") {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err == nil || !strings.Contains(err.Error(), "exclude") {
 		t.Fatalf("exclude directory should be rejected with context: %v", err)
 	}
 	if got, err := os.ReadFile(outside); err != nil || !bytes.Equal(got, outsideContent) {
@@ -242,13 +243,13 @@ func TestSyncVSCodeWorkspaceCanRetryAfterWriteBlockIsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := ProjectConfig{Name: "retry", Repos: map[string]RepoConfig{}}
-	if err := syncVSCodeWorkspace(root, cfg); err == nil {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err == nil {
 		t.Fatal("expected workspace write to fail while target is a directory")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncVSCodeWorkspace(root, cfg); err != nil {
+	if err := testEnv().syncVSCodeWorkspace(root, cfg); err != nil {
 		t.Fatalf("sync should succeed after the write block is removed: %v", err)
 	}
 	_, workspace := readVSCodeWorkspace(t, root)

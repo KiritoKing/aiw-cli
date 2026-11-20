@@ -7,33 +7,59 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Lifecycle commands come from the committed Agent Repo baseline, not a Change edit.
-func (c ChangeContext) lifecycleConfig() (ProjectConfig, error) {
-	data, err := git(c.Root, "show", "refs/heads/"+c.Config.Base+":aiw.yaml")
-	if err != nil {
-		return ProjectConfig{}, fmt.Errorf("read committed baseline aiw.yaml: %w", err)
+// Historical refs are used only to recover definitions for deleted repos in older state.
+func (c ChangeContext) historicalRepo(name string) (RepoConfig, bool) {
+	for _, ref := range []string{"HEAD", "refs/remotes/origin/" + c.Config.Base, "refs/heads/" + c.Config.Base} {
+		data, err := c.git(c.Root, "show", ref+":aiw.yaml")
+		if err != nil {
+			continue
+		}
+		// Older manifests could contain fields accepted before strict decoding.
+		var cfg ProjectConfig
+		if err := yaml.Unmarshal([]byte(data), &cfg); err != nil {
+			continue
+		}
+		if repo, ok := cfg.Repos[name]; ok {
+			if repo.Cleanup != nil && strings.TrimSpace(repo.Cleanup.Command) == "" {
+				repo.Cleanup = nil
+			}
+			return repo, true
+		}
 	}
-	cfg, err := parseProject([]byte(data))
-	if err != nil {
-		return cfg, err
-	}
-	if cfg.Base != c.Config.Base {
-		return cfg, fmt.Errorf("Change and baseline aiw.yaml disagree on Agent Repo base branch")
-	}
-	return cfg, nil
+	return RepoConfig{}, false
 }
 
-func (c ChangeContext) repoLifecycle(cfg ProjectConfig, name string) (RepoConfig, error) {
-	repo, ok := cfg.Repos[name]
+func (c ChangeContext) cleanupCommand(name string, entry RepoState) *RepoCommand {
+	if repo, ok := c.Config.Repos[name]; ok {
+		return repo.Cleanup
+	}
+	if entry.CleanupRecorded || entry.Cleanup != nil {
+		return entry.Cleanup
+	}
+	repo, _ := c.historicalRepo(name)
+	return repo.Cleanup
+}
+
+func (c ChangeContext) stateStore(name string, entry RepoState) (string, error) {
+	if entry.Store != "" {
+		return entry.Store, nil
+	}
+	registry, err := loadRegistry(c.Home)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := c.Config.Repos[name]; ok {
+		return c.storeFor(c.Config, registry, name)
+	}
+	repo, ok := c.historicalRepo(name)
 	if !ok {
-		return repo, fmt.Errorf("repo %s is absent from committed baseline aiw.yaml", name)
+		return "", fmt.Errorf("repo %s has no recorded store or historical remote", name)
 	}
-	if current, ok := c.Config.Repos[name]; ok && (canonicalRemote(current.Remote) != canonicalRemote(repo.Remote) || current.Base != repo.Base) {
-		return repo, fmt.Errorf("repo %s differs from committed baseline aiw.yaml", name)
-	}
-	return repo, nil
+	return c.registeredStore(registry, name, repo)
 }
 
 func (c ChangeContext) executeRepoCommand(name, path, action string, command *RepoCommand) error {
@@ -44,7 +70,7 @@ func (c ChangeContext) executeRepoCommand(name, path, action string, command *Re
 	if strings.ContainsRune(bin, os.PathSeparator) && !filepath.IsAbs(bin) {
 		bin = filepath.Join(path, bin)
 	}
-	cmd := exec.Command(bin, command.Args...)
+	cmd := exec.CommandContext(c.ctx, bin, command.Args...)
 	cmd.Dir = path
 	cmd.Env = append(os.Environ(),
 		"AIW_LIFECYCLE_ACTIVE=1",
@@ -54,45 +80,46 @@ func (c ChangeContext) executeRepoCommand(name, path, action string, command *Re
 		"AIW_REPO_NAME="+name,
 		"AIW_REPO_PATH="+path,
 	)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	fmt.Printf("%s %s in %s\n", action, name, path)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.In, c.Out, c.ErrOut
+	fmt.Fprintf(c.Out, "%s %s in %s\n", action, name, path)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("repo %s %s failed: %w", name, action, err)
 	}
 	return nil
 }
 
-func (c ChangeContext) setupRepo(s *ChangeState, name string, cfg ProjectConfig) error {
+func (c ChangeContext) setupRepo(s *ChangeState, name string) error {
 	entry := s.Repos[name]
 	if entry.Path == "" {
 		return fmt.Errorf("repo %s has no materialized worktree", name)
 	}
-	repo, err := c.repoLifecycle(cfg, name)
-	if err != nil {
-		return err
-	}
+	repo := c.Config.Repos[name]
 	if entry.Store == "" {
 		registry, err := loadRegistry(c.Home)
 		if err != nil {
 			return err
 		}
-		entry.Store, err = storeFor(c.Config, registry, name)
+		entry.Store, err = c.storeFor(c.Config, registry, name)
 		if err != nil {
 			return err
 		}
 	}
 	if entry.Setup == "running" {
-		fmt.Fprintf(os.Stderr, "repo %s setup was interrupted; retry may repeat script effects\n", name)
+		fmt.Fprintf(c.ErrOut, "repo %s setup was interrupted; retry may repeat script effects\n", name)
 	}
 	if err := c.checkOwned(name, entry.Path, entry.Store); err != nil {
 		return err
 	}
 	entry.Setup = "running"
+	entry.recordCleanup(repo.Cleanup)
 	s.Repos[name] = entry
 	if err := saveState(c.Home, *s); err != nil {
 		return err
 	}
-	err = c.executeRepoCommand(name, entry.Path, "setup", repo.Setup)
+	err := c.executeRepoCommand(name, entry.Path, "setup", repo.Setup)
+	if c.ctx.Err() != nil {
+		return c.ctx.Err()
+	}
 	if err != nil {
 		entry.Setup = "failed"
 	} else {
@@ -105,47 +132,45 @@ func (c ChangeContext) setupRepo(s *ChangeState, name string, cfg ProjectConfig)
 	return err
 }
 
-func (c ChangeContext) cleanupRepo(s *ChangeState, name string, cfg ProjectConfig, retry bool) error {
+func (c ChangeContext) cleanupRepo(s *ChangeState, name string, retry bool) error {
 	entry := s.Repos[name]
 	if entry.Path == "" {
 		return fmt.Errorf("repo %s has no materialized worktree", name)
 	}
-	if entry.Cleanup == "success" {
+	if entry.CleanupStatus == "success" {
 		return nil
 	}
-	if (entry.Cleanup == "failed" || entry.Cleanup == "running") && !retry {
-		return fmt.Errorf("repo %s cleanup is %s; run aiw change cleanup %s before retrying release", name, entry.Cleanup, name)
-	}
-	repo, err := c.repoLifecycle(cfg, name)
-	if err != nil {
-		return err
+	if (entry.CleanupStatus == "failed" || entry.CleanupStatus == "running") && !retry {
+		return fmt.Errorf("repo %s cleanup is %s; run aiw change cleanup %s before retrying release", name, entry.CleanupStatus, name)
 	}
 	if entry.Store == "" {
-		registry, err := loadRegistry(c.Home)
-		if err != nil {
-			return err
-		}
-		entry.Store, err = storeFor(c.Config, registry, name)
+		var err error
+		entry.Store, err = c.stateStore(name, entry)
 		if err != nil {
 			return err
 		}
 	}
-	if entry.Cleanup == "running" {
-		fmt.Fprintf(os.Stderr, "repo %s cleanup was interrupted; retry may repeat script effects\n", name)
+	if entry.CleanupStatus == "running" {
+		fmt.Fprintf(c.ErrOut, "repo %s cleanup was interrupted; retry may repeat script effects\n", name)
 	}
 	if err := c.checkOwned(name, entry.Path, entry.Store); err != nil {
 		return err
 	}
-	entry.Cleanup = "running"
+	command := c.cleanupCommand(name, entry)
+	entry.recordCleanup(command)
+	entry.CleanupStatus = "running"
 	s.Repos[name] = entry
 	if err := saveState(c.Home, *s); err != nil {
 		return err
 	}
-	err = c.executeRepoCommand(name, entry.Path, "cleanup", repo.Cleanup)
+	err := c.executeRepoCommand(name, entry.Path, "cleanup", command)
+	if c.ctx.Err() != nil {
+		return c.ctx.Err()
+	}
 	if err != nil {
-		entry.Cleanup = "failed"
+		entry.CleanupStatus = "failed"
 	} else {
-		entry.Cleanup = "success"
+		entry.CleanupStatus = "success"
 	}
 	s.Repos[name] = entry
 	if saveErr := saveState(c.Home, *s); saveErr != nil {
@@ -166,10 +191,6 @@ func (c ChangeContext) setup(names []string) error {
 	}
 	if s.Phase == "new" || s.Phase == "closed" || s.Phase == "closing" {
 		return fmt.Errorf("Change worktrees are not available for setup")
-	}
-	cfg, err := c.lifecycleConfig()
-	if err != nil {
-		return err
 	}
 	selected := map[string]bool{}
 	for _, name := range spec.Repos {
@@ -192,7 +213,7 @@ func (c ChangeContext) setup(names []string) error {
 		if !explicit && s.Repos[name].Setup == "success" {
 			continue
 		}
-		if err := c.setupRepo(&s, name, cfg); err != nil {
+		if err := c.setupRepo(&s, name); err != nil {
 			s.Phase = "setup-pending"
 			_ = saveState(c.Home, s)
 			return err
@@ -241,14 +262,16 @@ func (c ChangeContext) cleanup(name string) error {
 	if !ok || entry.Path == "" {
 		return fmt.Errorf("repo %s has no materialized worktree to clean", name)
 	}
-	if s.Phase != "closing" && entry.Cleanup != "failed" && entry.Cleanup != "running" {
-		spec, err := loadSpec(c.Root, c.Config)
-		if err != nil {
-			return err
-		}
-		for _, selected := range spec.Repos {
-			if selected == name {
-				return fmt.Errorf("repo %s is still selected; cleanup is available after removal from change.yaml", name)
+	if s.Phase != "closing" && entry.CleanupStatus != "failed" && entry.CleanupStatus != "running" {
+		if _, declared := c.Config.Repos[name]; declared {
+			spec, err := readSpec(c.Root)
+			if err != nil {
+				return err
+			}
+			for _, selected := range spec.Repos {
+				if selected == name {
+					return fmt.Errorf("repo %s is still selected; cleanup is available after removal from change.yaml", name)
+				}
 			}
 		}
 		if s.Phase == "ready" {
@@ -258,9 +281,5 @@ func (c ChangeContext) cleanup(name string) error {
 			}
 		}
 	}
-	cfg, err := c.lifecycleConfig()
-	if err != nil {
-		return err
-	}
-	return c.cleanupRepo(&s, name, cfg, true)
+	return c.cleanupRepo(&s, name, true)
 }

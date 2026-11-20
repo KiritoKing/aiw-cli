@@ -50,7 +50,7 @@ fi
 		f.mustGit(f.source[name], "commit", "-m", "lifecycle scripts")
 		f.mustGit(f.source[name], "push", "origin", "main")
 	}
-	cfg, err := loadProject(f.root)
+	cfg, err := testEnv().loadProject(f.root)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func lifecycleLog(t *testing.T, path string) string {
 func TestSetupRunsOnEveryMaterializeAndExplicitRetry(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	f.mustRun(testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
 	f.checkout()
 	c := f.context()
 	f.spec("web", "api")
@@ -117,7 +117,7 @@ func TestSetupRunsOnEveryMaterializeAndExplicitRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stdout = writer
-	statusErr := c.status(true)
+	statusErr := Run([]string{"change", "status", "--json"})
 	os.Stdout = oldStdout
 	writer.Close()
 	output, readErr := io.ReadAll(reader)
@@ -149,14 +149,14 @@ func TestSetupRunsOnEveryMaterializeAndExplicitRetry(t *testing.T) {
 	}
 }
 
-func TestLifecycleDefinitionUsesCommittedBaseline(t *testing.T) {
+func TestLifecycleDefinitionUsesCurrentWorktree(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
-	cfg, err := loadProject(f.change)
+	cfg, err := testEnv().loadProject(f.change)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,21 +166,21 @@ func TestLifecycleDefinitionUsesCommittedBaseline(t *testing.T) {
 	if err := saveProject(f.change, cfg); err != nil {
 		t.Fatal(err)
 	}
-	c, err = currentChange()
+	c, err = testEnv().currentChange()
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.mustRun(c.materialize(false))
-	if got := lifecycleLog(t, log); got != "setup:web\n" {
-		t.Fatalf("Change edit bypassed baseline setup: %q", got)
+	if got := lifecycleLog(t, log); got != "" {
+		t.Fatalf("removed setup command still ran: %q", got)
 	}
 }
 
 func TestCleanupFailureAndCloseFromControlPlane(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "api", f.source["api"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "api", f.source["api"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web", "api")
@@ -224,7 +224,7 @@ func TestCleanupFailureAndCloseFromControlPlane(t *testing.T) {
 func TestRepairDoesNotExecuteSetup(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -238,7 +238,7 @@ func TestRepairDoesNotExecuteSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := storeFor(c.Config, registry, "web")
+	store, err := testEnv().storeFor(c.Config, registry, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestRepairDoesNotExecuteSetup(t *testing.T) {
 func TestCloseCleanupFailureKeepsBusinessAndRootWorktrees(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -318,7 +318,7 @@ func TestCloseCleanupFailureKeepsBusinessAndRootWorktrees(t *testing.T) {
 func TestCloseRechecksRemoteAfterCleanupCommit(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -345,8 +345,8 @@ func TestCloseRechecksRemoteAfterCleanupCommit(t *testing.T) {
 func TestExplicitCleanupBeforeDirtyScopeRemoval(t *testing.T) {
 	f := newFixture(t)
 	log := f.lifecycleScripts()
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "api", f.source["api"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "api", f.source["api"]))
 	f.checkout()
 	c := f.context()
 	if err := os.WriteFile(os.Getenv("AIW_TEST_SETUP_DIRTY"), nil, 0600); err != nil {
@@ -368,5 +368,168 @@ func TestExplicitCleanupBeforeDirtyScopeRemoval(t *testing.T) {
 	f.mustRun(c.materialize(false))
 	if _, err := os.Lstat(c.linkPath("web")); !os.IsNotExist(err) {
 		t.Fatalf("cleaned worktree was not released: %v", err)
+	}
+}
+
+func TestRemovedRepoUsesSavedCleanup(t *testing.T) {
+	f := newFixture(t)
+	log := f.lifecycleScripts()
+	f.mustRun(testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	f.checkout()
+	c := f.context()
+	f.spec("web", "api")
+	web := c.Config.Repos["web"]
+	web.Cleanup = &RepoCommand{Command: "sh", Args: []string{"-c", `echo cached >> "$AIW_TEST_LIFECYCLE_LOG"`}}
+	c.Config.Repos["web"] = web
+	f.mustRun(saveProject(f.change, c.Config))
+	f.mustRun(c.materialize(false))
+
+	delete(c.Config.Repos, "web")
+	f.mustRun(saveProject(f.change, c.Config))
+	f.mustRun(Run([]string{"change", "cleanup", "web"}))
+	f.spec("api")
+	f.mustRun(Run([]string{"change", "materialize"}))
+	if got := lifecycleLog(t, log); strings.Count(got, "cached\n") != 1 || strings.Contains(got, "cleanup:web") {
+		t.Fatalf("saved cleanup was not used exactly once: %q", got)
+	}
+	if _, err := os.Lstat(c.linkPath("web")); !os.IsNotExist(err) {
+		t.Fatalf("removed worktree link remains: %v", err)
+	}
+
+	delete(c.Config.Repos, "api")
+	f.mustRun(saveProject(f.change, c.Config))
+	f.mustRun(Run([]string{"change", "close", "--allow-unpushed"}))
+	if !strings.Contains(lifecycleLog(t, log), "cleanup:api\n") {
+		t.Fatal("close did not clean the removed repo")
+	}
+}
+
+func TestLifecycleWithoutLocalAgentBase(t *testing.T) {
+	f := newFixture(t)
+	log := f.lifecycleScripts()
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustGit(f.root, "switch", "--detach", "origin/main")
+	f.mustGit(f.root, "branch", "-D", "main")
+	f.mustGit(f.root, "worktree", "add", "-b", "feat/integration", f.change, "origin/main")
+	f.context()
+	f.spec("web")
+	f.mustRun(Run([]string{"change", "materialize"}))
+	f.mustRun(Run([]string{"change", "status", "--json"}))
+	f.mustRun(Run([]string{"change", "setup", "web"}))
+	f.mustRun(Run([]string{"change", "close", "--allow-unpushed"}))
+	if got := lifecycleLog(t, log); got != "setup:web\nsetup:web\ncleanup:web\n" {
+		t.Fatalf("unexpected lifecycle log: %q", got)
+	}
+}
+
+func TestCurrentConfigControlsAddedRepoBaseAndLifecycle(t *testing.T) {
+	f := newFixture(t)
+	log := f.lifecycleScripts()
+	f.mustGit(f.source["web"], "switch", "-c", "candidate")
+	f.mustGit(f.source["web"], "commit", "--allow-empty", "-m", "candidate-only")
+	base := f.mustGit(f.source["web"], "rev-parse", "HEAD")
+	f.mustGit(f.source["web"], "push", "-u", "origin", "candidate")
+	f.checkout()
+	cfg, err := testEnv().loadProject(f.change)
+	f.mustRun(err)
+	cfg.Base = "release"
+	action := func(label string) *RepoCommand {
+		return &RepoCommand{Command: "sh", Args: []string{"-c", `printf '%s\n' "$1" >> "$AIW_TEST_LIFECYCLE_LOG"`, "test-lifecycle", label}}
+	}
+	repo := RepoConfig{Remote: f.remote["web"], Base: "candidate", Setup: action("uncommitted setup"), Cleanup: action("cached cleanup")}
+	cfg.Repos["new-web"] = repo
+	f.mustRun(saveProject(f.change, cfg))
+	f.spec("new-web")
+	_, _, err = runCLI(f.change, "repo", "register", "new-web", "--source", f.source["web"])
+	f.mustRun(err)
+	_, _, err = runCLI(f.change, "change", "materialize")
+	f.mustRun(err)
+	project, err := testEnv().gitCommonDir(f.change)
+	f.mustRun(err)
+	state, err := loadState(os.Getenv("AIW_HOME"), project, "feat/integration")
+	f.mustRun(err)
+	if state.Repos["new-web"].Base != base {
+		t.Fatalf("wrong creation baseline: %+v, want %s", state.Repos["new-web"], base)
+	}
+
+	repo.Setup = action("committed setup")
+	cfg.Repos["new-web"] = repo
+	f.mustRun(saveProject(f.change, cfg))
+	f.mustGit(f.change, "add", "aiw.yaml")
+	f.mustGit(f.change, "commit", "-m", "update lifecycle on Change")
+	_, _, err = runCLI(f.change, "change", "setup", "new-web")
+	f.mustRun(err)
+	repo.Cleanup = action("uncommitted cleanup")
+	cfg.Repos["new-web"] = repo
+	f.mustRun(saveProject(f.change, cfg))
+	out, _, err := runCLI(f.change, "change", "status", "--json")
+	var rows []StatusRow
+	if err != nil || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 || !rows[0].Ready || rows[1].BaseSHA != base {
+		t.Fatalf("unexpected current status: %s, %v", out, err)
+	}
+	_, _, err = runCLI(f.change, "change", "close", "--allow-unpushed")
+	f.mustRun(err)
+	if got := lifecycleLog(t, log); got != "uncommitted setup\ncommitted setup\nuncommitted cleanup\n" {
+		t.Fatalf("current config commands did not take effect: %q", got)
+	}
+}
+
+func TestLegacyRemovedRepoCleanupFallsBackToOriginBase(t *testing.T) {
+	f := newFixture(t)
+	log := f.lifecycleScripts()
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.checkout()
+	c := f.context()
+	f.spec("web")
+	f.mustRun(c.materialize(false))
+
+	state, err := c.state()
+	f.mustRun(err)
+	web := state.Repos["web"]
+	web.Cleanup, web.CleanupRecorded = nil, false
+	state.Repos["web"] = web
+	f.mustRun(saveState(c.Home, state))
+	delete(c.Config.Repos, "web")
+	f.mustRun(saveProject(f.change, c.Config))
+	f.mustGit(f.change, "add", "aiw.yaml")
+	f.mustGit(f.change, "commit", "-m", "remove web from Change config")
+	// The local main tip has no lifecycle definitions, but origin/main still does.
+	f.mustGit(f.root, "switch", "--detach", "main")
+	f.mustGit(f.root, "branch", "-f", "main", "main^")
+	_, _, err = runCLI(f.change, "change", "close", "--allow-unpushed")
+	f.mustRun(err)
+	if got := lifecycleLog(t, log); got != "setup:web\ncleanup:web\n" {
+		t.Fatalf("origin base cleanup was not recovered: %q", got)
+	}
+	state, err = c.state()
+	f.mustRun(err)
+	if state.Phase != "closed" || state.Repos["web"].Path != "" {
+		t.Fatalf("legacy worktree not released: %+v", state)
+	}
+}
+
+func TestRemovedRepoWithEmptyCleanupSnapshotDoesNotReplayHistory(t *testing.T) {
+	f := newFixture(t)
+	log := f.lifecycleScripts()
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.checkout()
+	c := f.context()
+	f.spec("web")
+	repo := c.Config.Repos["web"]
+	repo.Cleanup = nil
+	c.Config.Repos["web"] = repo
+	f.mustRun(saveProject(f.change, c.Config))
+	f.mustRun(c.materialize(false))
+	state, err := c.state()
+	f.mustRun(err)
+	if !state.Repos["web"].CleanupRecorded || state.Repos["web"].Cleanup != nil {
+		t.Fatalf("no record of the removed cleanup definition: %+v", state.Repos["web"])
+	}
+	delete(c.Config.Repos, "web")
+	f.mustRun(saveProject(f.change, c.Config))
+	_, _, err = runCLI(f.change, "change", "close", "--allow-unpushed")
+	f.mustRun(err)
+	if got := lifecycleLog(t, log); got != "setup:web\n" {
+		t.Fatalf("historical cleanup was replayed: %q", got)
 	}
 }

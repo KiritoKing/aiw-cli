@@ -25,13 +25,15 @@ go run ./cmd/aiw --help
 go build -buildvcs=false -o ./build/aiw ./cmd/aiw
 ```
 
-源码发布后可运行 `go install github.com/KiritoKing/aiw-cli/cmd/aiw@latest`。`scripts/build-release.sh` 在本地生成 macOS/Linux 的 arm64、amd64 二进制；脚本只构建，不上传。GitHub Actions 会在 PR 和 `master` 上验证、构建四个平台二进制，并在推送 `v*` tag 后把带版本的压缩包和 `checksums.txt` 发布到同名 GitHub Release。干净开发容器应从团队镜像的制品库下载仓库锁定版本，并校验 SHA-256，不应依赖 `latest` 或 `curl | sh`。`aiw version` 输出当前二进制版本；本地未注入版本的构建为 `dev`。旧 npm 包的命令面不再由此仓库维护。
+源码发布后可运行 `go install github.com/KiritoKing/aiw-cli/cmd/aiw@latest`。`scripts/build-release.sh` 在本地生成 macOS/Linux 的 arm64、amd64 二进制；脚本只构建，不上传。GitHub Actions 会在 PR 和 `master` 上验证、构建四个平台二进制，并在推送 `v*` tag 后把带版本的压缩包和 `checksums.txt` 发布到同名 GitHub Release。干净开发容器应从团队镜像的制品库下载仓库锁定版本，并校验 SHA-256，不应依赖 `latest` 或 `curl | sh`。`aiw version`、`aiw --version` 和 `aiw -v` 输出当前二进制版本；本地未注入版本的构建为 `dev`。旧 npm 包的命令面不再由此仓库维护。
 
-默认本机数据目录是 `~/.local/share/aiw`，可用 `AIW_HOME` 覆盖。Git 命令默认从 `PATH` 解析；需要指定 Git 可执行文件时设置 `AIW_GIT`。
+默认本机数据目录是 `~/.local/share/aiw`，可用 `AIW_HOME` 覆盖。Git 命令默认从 `PATH` 解析，可用 `AIW_GIT` 指定可执行文件。Git 运行时禁用终端口令提示，使用现有 Git 凭据或 SSH 配置。
+
+命令可用 `-C <dir>` 或 `--cwd <dir>` 指定运行目录，`--verbose` 将脱敏的 Git 命令和耗时写入 stderr。`--no-input` 禁用 CLI 交互，设置 CI、使用 JSON 或将任一 I/O 流重定向也会禁用交互。`--no-color`、`NO_COLOR`、`TERM=dumb` 或非终端输出会禁用颜色。
 
 ### Shell Tab 补全
 
-`aiw completion zsh` 和 `aiw completion bash` 输出对应的补全脚本，支持顶层及 `repo`、`change` 子命令和常用选项。在 zsh 中，将脚本放进 `fpath` 中已配置的补全目录，再打开新终端。例如使用 Oh My Zsh 默认目录时：
+`aiw completion zsh|bash|fish|powershell` 生成对应的 shell 补全脚本。补全根据当前 `aiw.yaml` 提供仓库名、基线和描述，并为 `change path` 和 `change open` 提供当前项目登记的分支。在 zsh 中，将脚本放进 `fpath` 中已配置的补全目录，再打开新终端。例如使用 Oh My Zsh 默认目录时：
 
 ```bash
 aiw completion zsh > ~/.oh-my-zsh/custom/completions/_aiw
@@ -44,7 +46,7 @@ autoload -Uz _aiw
 compdef _aiw aiw
 ```
 
-在 bash 中，可将 `source <(aiw completion bash)` 加到 `~/.bashrc`，或在当前会话中执行一次。
+在 bash 中，加载 bash-completion 后执行 `source <(aiw completion bash)`，或将该命令加到 `~/.bashrc`。
 
 ## 初始化固定 Agent Repo
 
@@ -85,7 +87,7 @@ repos:
 
 `aiw.yaml` 描述固定可用的仓库集合，不包含个人路径。`base` 是 Agent Repo 的基线分支；每个业务仓也有自己的基线分支。
 每仓可选的 `metadata` 是项目自定义信息，例如职责、标签或服务标识。AIW 不用它决定物化和生命周期行为；它会随 `repo list --json` 返回，故不要在其中放密钥或本机路径。仓库 ID 是 `repos` 下的键，业务 worktree 链接路径固定为 `repos/<name>`；不需要再维护第二份带 ID、remote、base 的清单。
-每仓的 `setup`、`cleanup` 可选，命令及参数从 Agent Repo **基线分支已提交的** `aiw.yaml` 读取。命令在对应业务仓 worktree 内直接执行，不经过 shell；相对脚本路径相对该业务仓。执行时提供 `AIW_CHANGE_ROOT`、`AIW_CHANGE_BRANCH`、`AIW_REPO_NAME`、`AIW_REPO_PATH` 和 `AIW_LIFECYCLE_ACTION` 环境变量。脚本应支持重试；逐仓脚本不可递归调用 AIW Change 命令。
+每仓的 `setup`、`cleanup` 可选，命令及参数读取 **当前 Change 工作区** 的 `aiw.yaml`，未提交的修改也会生效。执行前请核对该文件及脚本来源。业务基线的修改用于新创建的 worktree，已有 worktree 保留创建时的基线 SHA。未知 YAML 字段会报错，`metadata` 可自由扩展。HTTP(S) remote 不能携带用户名或令牌，SSH 用户名可正常使用。命令在对应业务仓 worktree 内直接执行，不经过 shell；相对脚本路径相对该业务仓。执行时提供 `AIW_CHANGE_ROOT`、`AIW_CHANGE_BRANCH`、`AIW_REPO_NAME`、`AIW_REPO_PATH` 和 `AIW_LIFECYCLE_ACTION` 环境变量。脚本应支持重试；逐仓脚本不可递归调用 AIW Change 命令。
 
 根仓的 SDD 或知识初始化由团队自己的提示词、Agent 和工具完成：它可以整理跨仓职责、候选仓库和需求上下文，再在本次 Change 的方案中确定要物化的仓库。`aiw.yaml` 仍只列可物化仓库；AIW 不要求 OpenSpec，也不替团队生成业务知识。
 
@@ -142,18 +144,20 @@ aiw repo sync web
 3. 在任务分发前，由 Agent 从该 worktree 执行 `aiw change materialize`。AIW 为选中的仓库创建与 Agent Repo 当前分支**同名**的业务分支和 worktree，挂到 `repos/`，再逐仓执行 setup。全部成功后命令才返回就绪；AIW 不分发任务。
 4. 执行中若发现仓库范围有误，修改 `.aiw/change.yaml` 并再次运行 `aiw change materialize`。每次物化都会重跑全部已选仓库的 setup。移出清单的仓库先执行 cleanup，再释放 worktree；有本地改动的仓库不会被静默删除。
 
-`.aiw/change.yaml` 是控制面中立的输入文件。AIW 不解析 OpenSpec 的 proposal、design 或 tasks；这些流程自行决定何时生成、修改和提交选择清单。也可使用 `aiw change select --repo web --repo api`、`add-repo`、`remove-repo` 修改清单；AIW 只对自己修改的清单自动提交。已有同名业务分支若不属于当前登记的 Change，会报冲突。
+`.aiw/change.yaml` 是控制面中立的输入文件。AIW 不解析 OpenSpec 的 proposal、design 或 tasks；这些流程自行决定何时生成、修改和提交选择清单。也可使用 `aiw change select --repo web --repo api`、`add-repo`、`remove-repo` 修改清单。在交互式终端中，可直接运行 `aiw change select` 勾选仓库，初始勾选来自当前选择清单。脚本和 Agent 调用需提供 `--repo`。AIW 只对自己修改的清单自动提交。已有同名业务分支若不属于当前登记的 Change，会报冲突。
 
 常用只读命令：
 
 ```bash
 aiw change status --json
-aiw change list
+aiw change list --json
 aiw change path feat/example
-aiw doctor
+aiw doctor --json
 ```
 
 `change status` 汇总根仓与已挂入业务仓的 HEAD、分支、改动及 setup/cleanup 状态；JSON 中根仓的 `ready` 表示能否分发任务，业务仓的 `baseSha` 是创建 worktree 时保存的基线提交。setup 失败会保留 worktree 和链接，并使 Change 未就绪；修复环境后用 `aiw change setup` 续跑待执行或失败的仓库，或用 `aiw change setup <name>` 重跑指定仓库。仓库移出清单但仍有本地文件时，自动物化会先阻止释放；可检查文件后显式运行 `aiw change cleanup <name>`，再重试物化。`change open` 只返回控制面现有 worktree 路径。中断后 `aiw change repair` 恢复 worktree 和链接，不自动重放脚本；执行中的脚本结果未知，显式重试可能重复副作用。
+
+`change list` 按分支名排序，根目录缺失的 Change 显示为 `stale`，JSON 中对应 `rootExists: false`。`doctor [--json]` 检查 AIW/Git、AIW_HOME、Node/npx、项目 YAML、`/repos/` 忽略规则、AGENTS.md 托管区块、bare store 以及根目录缺失但仍有业务 worktree 的 Change。Node/npx 缺失和孤儿 Change 分别记录为信息和告警。失败检查返回非零退出码，`--json` 仍会输出完整报告。
 
 根仓的 `git status` 和 `git diff` 不包含 `repos/` 链接内的业务改动。控制面可按需把具体业务仓路径作为本地工作区打开；也可直接运行 `git -C repos/<name> status` 和 `git -C repos/<name> diff`。各业务仓分别测试、提交、推送和创建 MR，根仓的 SDD 或交接记录可以汇总各仓提交 SHA、MR 链接及验证结果。AIW 只提供路径与状态，不执行代码交付。
 
@@ -163,12 +167,12 @@ aiw doctor
 aiw change close
 ```
 
-上层控制面的 cleanup script 调用 `aiw change close`，成功后才删除根 worktree。`close` 逐一读取 Agent Repo 和业务仓远端同名分支 SHA。远端不存在、不可达或与本地 HEAD 不一致时，会展示原因并要求再次确认。将被删除的业务 worktree 若含未提交、未跟踪或忽略文件，会单独列出并再次确认。无交互环境需要分别提供 `--allow-unpushed` 和 `--discard-changes`。AIW 逐仓执行 cleanup 后重新检查远端分支和待丢弃内容，才释放业务 worktree；cleanup 失败时保留 worktree，可运行 `aiw change cleanup <name>` 续跑。关闭保留所有分支及根 worktree；若关闭失败，控制面不得删除根 worktree。
+上层控制面的 cleanup script 调用 `aiw change close`，成功后才删除根 worktree。`close` 逐一读取 Agent Repo 和业务仓远端同名分支 SHA。远端不存在、不可达或与本地 HEAD 不一致时，会展示原因并要求再次确认。将被删除的业务 worktree 若含未提交、未跟踪或忽略文件，会单独列出并再次确认。交互终端查看风险汇总并输入分支名确认。无交互环境按风险分别提供 `--allow-unpushed` 和 `--discard-changes`。AIW 逐仓执行 cleanup 后重新检查远端分支和待丢弃内容，才释放业务 worktree；cleanup 失败时保留 worktree，可运行 `aiw change cleanup <name>` 续跑。关闭保留所有分支及根 worktree；若关闭失败，控制面不得删除根 worktree。已从 `aiw.yaml` 删除的仓库仍可显式 cleanup 或随 Change 关闭。若通过重新物化缩减范围，先从 `.aiw/change.yaml` 移除该仓。释放优先使用状态中登记的 Store；脚本优先读当前配置，已删仓回退到记录的 cleanup。对缺少记录的旧状态，依次从 HEAD、`origin/<base>` 和本地基线恢复历史定义。
 
 ## 开发验证
 
 ```bash
-go test ./...
+go test -race -timeout 5m ./...
 go vet ./...
 scripts/build-release.sh
 ```

@@ -1,13 +1,15 @@
 package aiw
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestInitExistingRepoThroughSymlink(t *testing.T) {
-	if _, err := git("", "--version"); err != nil {
+	isolateGitConfig(t)
+	if _, err := testEnv().git("", "--version"); err != nil {
 		t.Skipf("Git unavailable: %v", err)
 	}
 	base := t.TempDir()
@@ -20,13 +22,19 @@ func TestInitExistingRepoThroughSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	realRepo := filepath.Join(realDir, "agent")
-	if _, err := git("", "init", "-b", "main", realRepo); err != nil {
+	if _, err := testEnv().git("", "init", "-b", "main", realRepo); err != nil {
 		t.Fatal(err)
 	}
-	if err := runInit([]string{filepath.Join(alias, "agent"), "--skip-skills"}); err != nil {
+	if err := Run([]string{"init", filepath.Join(alias, "agent"), "--skip-skills"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(realRepo, "aiw.yaml")); err != nil {
 		t.Fatalf("expected AIW config in existing Git root: %v", err)
 	}
+}
+
+func testEnv() commandEnv {
+	env := newCommandEnv(context.Background(), defaultIO())
+	env.Cwd, _ = os.Getwd()
+	return env
 }

@@ -8,12 +8,16 @@
 - Agent Repo 的初始 SDD 与跨仓知识由团队自己的提示词和工具维护；它们可以记录候选仓库，但只有 `aiw.yaml` 声明的仓库可被 AIW 物化。
 - Agent Repo 的 `aiw.yaml` 声明可用仓库；业务仓本机注册信息及 Change 执行状态保存在 `AIW_HOME`。物化不隐式 fetch 或 clone，不修改作为注册来源的原 checkout。
 - 每仓可选的 `metadata` 是项目自定义的静态信息，AIW 解析并经 `repo list --json` 提供，但不据此改变 Git、worktree 或脚本行为。仓库 ID、remote 和 base 只在 `aiw.yaml` 维护。
-- 每次物化在结构调整完成后执行选中仓库的 setup；全部成功才就绪。仓库移出范围或 `change close` 释放业务 worktree 前执行 cleanup。脚本定义取自 Agent Repo 基线分支已提交的 `aiw.yaml`。
+- 每次物化在结构调整完成后执行选中仓库的 setup；全部成功才就绪。仓库移出范围或 `change close` 释放业务 worktree 前执行 cleanup。脚本定义取自当前 Change 工作区的 `aiw.yaml`，包括当前未提交的内容。已有业务 worktree 保留创建时的基线 SHA。选仓协调时记录 cleanup 定义。已从清单删除的仓库释放时优先使用登记的 Store 与保存的 cleanup，旧状态再按 HEAD、远端跟踪基线和本地基线顺序查询。
 - `change close` 由控制面的 cleanup script 调用。它负责业务 worktree 的检查和释放；只有成功后，控制面才能移除根 worktree。AIW 不接管根 worktree、SDD、Agent 或代码交付流程。
 - `init` 维护根仓 `AGENTS.md` 中由 AIW 标记的协作规则，生成 `.aiw/aiw-toolchain.env` 和 `.aiw/bootstrap-aiw.sh`，默认通过社区 `npx skills add` 安装 AIW skills；无 Node/npx 时仅用内置 Go 副本补齐缺失文件。版本锁必须由团队填写制品地址和 Release 校验和后提交；bootstrap 在校验完成前不下载。已有仓库使用 `agents sync` 更新标记区块；skill 后续升级由社区工具或用户工具负责。
 - `internal/aiw/vscode_workspace.go` 按当前 worktree 的 `aiw.yaml` 生成根目录 `aiw.code-workspace`，包含根仓和全部配置子仓的相对路径；不按 Change 选择过滤，不读取原 checkout 路径。`init`、`materialize`/`repair` 的协调流程默认同步，`vscode.autoSync: false` 仅关闭自动入口；`workspace sync` 显式整份覆盖。输出通过本机 Git `info/exclude` 精确忽略，更新共用锁保护的 exclude 时保留原内容，不改变 `.gitignore`、业务 worktree 和 Change 状态格式。
-- `repo list --json` 和 `change status --json` 向控制面提供本机登记、业务仓分支与创建基线 SHA。根仓 Git 不追踪 `repos/` 链接内的业务改动；业务仓的 diff、提交、push、MR 均由各仓自身工具处理。
+- Cobra 命令树统一校验、帮助及 zsh、bash、fish、PowerShell 补全，运行环境按调用传递 cwd、I/O 和取消上下文。子进程禁用 Git 终端口令提示，`--verbose` 的脱敏命令日志写 stderr。现有本机锁文件用 gofrs/flock，竞争时提示并可取消。
+- Lipgloss 与 Huh 提供表格和交互。选择和关闭确认只在输入、输出和错误流都是真实终端且 CI、JSON、no-input 模式均关闭时启用。脚本直接使用本次命令 I/O。
+- `repo list --json` 和 `change status --json` 向控制面提供本机登记、业务仓分支与创建基线 SHA。`change list --json` 按分支名排序并提供 `rootExists`，`doctor --json` 报告本机环境、Agent Repo、登记与孤儿 Change 检查。根仓 Git 不追踪 `repos/` 链接内的业务改动；业务仓的 diff、提交、push、MR 均由各仓自身工具处理。
 - `.github/workflows/ci.yml` 在 PR/master 上验证 Go 测试、vet 和四个平台的交叉编译；只有 `v*` tag 会创建 GitHub Release，并附带版本化归档和 SHA-256 清单。内部制品库应镜像这些不可变制品，不能由该公开工作流推断或管理。
+
+测试 fixture 使用临时仓库和独立 Git 全局配置，禁用提交签名与 fsmonitor，避免宿主配置影响验证。
 
 ## 重大变更的事前文档
 
