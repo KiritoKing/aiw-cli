@@ -105,6 +105,7 @@ func TestAgentBlockRejectsMalformedAndSymlink(t *testing.T) {
 }
 
 func TestInitSkipSkills(t *testing.T) {
+	isolateGitConfig(t)
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("Git unavailable")
@@ -112,7 +113,7 @@ func TestInitSkipSkills(t *testing.T) {
 	t.Setenv("AIW_GIT", gitPath)
 	t.Setenv("PATH", t.TempDir())
 	root := filepath.Join(t.TempDir(), "agent")
-	if err := runInit([]string{root, "--skip-skills"}); err != nil {
+	if err := Run([]string{"init", root, "--skip-skills"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
@@ -148,6 +149,7 @@ func TestInitSkipSkills(t *testing.T) {
 }
 
 func TestGeneratedBootstrapRejectsIncompleteLockBeforeDownload(t *testing.T) {
+	isolateGitConfig(t)
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("Git unavailable")
@@ -157,7 +159,7 @@ func TestGeneratedBootstrapRejectsIncompleteLockBeforeDownload(t *testing.T) {
 	defer func() { BuildVersion = previousVersion }()
 	t.Setenv("AIW_GIT", gitPath)
 	root := filepath.Join(t.TempDir(), "agent")
-	if err := runInit([]string{root, "--skip-skills"}); err != nil {
+	if err := Run([]string{"init", root, "--skip-skills"}); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bootstrapPath(root))
@@ -180,7 +182,7 @@ func TestVersionOutput(t *testing.T) {
 func TestBundledSkillsFallbackAndConflict(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
-	if err := installSkills(root); err != nil {
+	if err := testEnv().installSkills(root); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range aiwSkillNames {
@@ -193,14 +195,14 @@ func TestBundledSkillsFallbackAndConflict(t *testing.T) {
 			t.Fatalf("bundled skill %s mismatch: %v", name, err)
 		}
 	}
-	if err := installSkills(root); err != nil {
+	if err := testEnv().installSkills(root); err != nil {
 		t.Fatalf("identical install should be idempotent: %v", err)
 	}
 	conflict := filepath.Join(root, ".agents", "skills", "aiw-init", "SKILL.md")
 	if err := os.WriteFile(conflict, []byte("user edited"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installSkills(root); err == nil {
+	if err := testEnv().installSkills(root); err == nil {
 		t.Fatal("expected user edit conflict")
 	}
 	got, _ := os.ReadFile(conflict)
@@ -222,7 +224,7 @@ func TestNpxSkillInstallerArguments(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("PATH", bin)
 	t.Setenv("AIW_NPX_ARGS", argsFile)
-	if err := installSkills(root); err != nil {
+	if err := testEnv().installSkills(root); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(argsFile)
@@ -246,7 +248,7 @@ func TestNpxFailureDoesNotUseBundledFallback(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", bin)
-	if err := installSkills(root); err == nil || !strings.Contains(err.Error(), "npx skills add failed") {
+	if err := testEnv().installSkills(root); err == nil || !strings.Contains(err.Error(), "npx skills add failed") {
 		t.Fatalf("expected npx failure, got %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".agents")); !os.IsNotExist(err) {
@@ -267,7 +269,7 @@ func TestNpxRejectsOutdatedSkills(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", bin)
-	if err := installSkills(root); err == nil || !strings.Contains(err.Error(), "outdated") {
+	if err := testEnv().installSkills(root); err == nil || !strings.Contains(err.Error(), "outdated") {
 		t.Fatalf("expected outdated skill error, got %v", err)
 	}
 }
@@ -296,8 +298,8 @@ func captureStdout(t *testing.T, run func() error) []byte {
 
 func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
-	cfg, err := loadProject(f.root)
+	f.mustRun(testEnv().scanRepos(f.root, os.Getenv("AIW_HOME"), f.base))
+	cfg, err := testEnv().loadProject(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +309,7 @@ func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	if err := saveProject(f.root, cfg); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := loadProject(f.root)
+	reloaded, err := testEnv().loadProject(f.root)
 	if err != nil || reloaded.Repos["api"].Metadata["description"] != "API service" {
 		t.Fatalf("metadata did not survive config round trip: %v", err)
 	}
@@ -318,7 +320,7 @@ func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	if err := os.Chdir(f.root); err != nil {
 		t.Fatal(err)
 	}
-	listOutput := captureStdout(t, func() error { return runRepo([]string{"list", "--json"}) })
+	listOutput := captureStdout(t, func() error { return Run([]string{"repo", "list", "--json"}) })
 	if err := os.Chdir(previous); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +339,7 @@ func TestRepoListAndChangeStatusJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statusOutput := captureStdout(t, func() error { return c.status(true) })
+	statusOutput := captureStdout(t, func() error { return Run([]string{"change", "status", "--json"}) })
 	var rows []StatusRow
 	if err := json.Unmarshal(statusOutput, &rows); err != nil {
 		t.Fatal(err)

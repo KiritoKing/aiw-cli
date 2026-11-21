@@ -21,22 +21,15 @@ const (
 - Inspect local changes before removing a repo or closing a Change. The control plane removes the root worktree only after aiw change close succeeds.`
 )
 
-func runAgents(args []string) error {
-	if len(args) != 1 || args[0] != "sync" {
-		return fmt.Errorf("usage: aiw agents sync")
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	root, err := projectRoot(cwd)
+func (r commandEnv) syncAgents() error {
+	root, err := projectRoot(r.Cwd)
 	if err != nil {
 		return err
 	}
 	if err := syncAgentInstructions(root); err != nil {
 		return err
 	}
-	fmt.Printf("updated %s\n", filepath.Join(root, "AGENTS.md"))
+	fmt.Fprintln(r.Out, "updated", filepath.Join(root, "AGENTS.md"))
 	return nil
 }
 
@@ -63,13 +56,7 @@ func syncAgentInstructions(root string) error {
 	if bytes.Equal(original, updated) && info != nil {
 		return nil
 	}
-	if err := atomicWrite(path, updated); err != nil {
-		return err
-	}
-	if info != nil {
-		return os.Chmod(path, info.Mode().Perm())
-	}
-	return nil
+	return atomicWrite(path, updated)
 }
 
 func updateAgentBlock(original []byte) ([]byte, error) {

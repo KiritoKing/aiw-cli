@@ -21,7 +21,7 @@ type vscodeWorkspaceFolder struct {
 	Path string `json:"path"`
 }
 
-func syncVSCodeWorkspace(root string, cfg ProjectConfig) error {
+func (r commandEnv) syncVSCodeWorkspace(root string, cfg ProjectConfig) error {
 	workspacePath := filepath.Join(root, vscodeWorkspaceFile)
 	if err := assertVSCodeWorkspaceTarget(workspacePath); err != nil {
 		return err
@@ -49,7 +49,7 @@ func syncVSCodeWorkspace(root string, cfg ProjectConfig) error {
 	}
 	data = append(data, '\n')
 
-	if err := syncVSCodeWorkspaceExclude(root); err != nil {
+	if err := r.syncVSCodeWorkspaceExclude(root); err != nil {
 		return err
 	}
 	if err := atomicWrite(workspacePath, data); err != nil {
@@ -58,11 +58,11 @@ func syncVSCodeWorkspace(root string, cfg ProjectConfig) error {
 	return nil
 }
 
-func autoSyncVSCodeWorkspace(root string, cfg ProjectConfig) error {
+func (r commandEnv) autoSyncVSCodeWorkspace(root string, cfg ProjectConfig) error {
 	if cfg.VSCode.AutoSync != nil && !*cfg.VSCode.AutoSync {
 		return nil
 	}
-	return syncVSCodeWorkspace(root, cfg)
+	return r.syncVSCodeWorkspace(root, cfg)
 }
 
 func assertVSCodeWorkspaceTarget(path string) error {
@@ -79,12 +79,12 @@ func assertVSCodeWorkspaceTarget(path string) error {
 	return nil
 }
 
-func syncVSCodeWorkspaceExclude(root string) error {
+func (r commandEnv) syncVSCodeWorkspaceExclude(root string) error {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return fmt.Errorf("exclude for workspace %s: resolve root: %w", root, err)
 	}
-	excludePath, err := git(rootAbs, "rev-parse", "--git-path", "info/exclude")
+	excludePath, err := r.git(rootAbs, "rev-parse", "--git-path", "info/exclude")
 	if err != nil {
 		return fmt.Errorf("exclude for workspace %s: resolve Git info/exclude: %w", rootAbs, err)
 	}
@@ -92,7 +92,7 @@ func syncVSCodeWorkspaceExclude(root string) error {
 		excludePath = filepath.Join(rootAbs, excludePath)
 	}
 
-	err = withLock(excludePath+".aiw.lock", func() error {
+	err = r.withLock(excludePath+".aiw.lock", func() error {
 		info, statErr := os.Lstat(excludePath)
 		if statErr != nil && !os.IsNotExist(statErr) {
 			return fmt.Errorf("exclude %s: inspect: %w", excludePath, statErr)

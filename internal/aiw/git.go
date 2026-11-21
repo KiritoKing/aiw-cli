@@ -2,12 +2,15 @@ package aiw
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func gitBin() string {
@@ -17,14 +20,34 @@ func gitBin() string {
 	return "git"
 }
 
-func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command(gitBin(), args...)
+type gitRunner struct {
+	ctx     context.Context
+	verbose io.Writer
+}
+
+func (g gitRunner) git(dir string, args ...string) (string, error) {
+	start := time.Now()
+	if g.verbose != nil {
+		defer func() {
+			safe := make([]string, len(args))
+			for i, arg := range args {
+				safe[i] = redactCredentials(arg)
+			}
+			fmt.Fprintf(g.verbose, "git %q in %q (%s)\n", safe, dir, time.Since(start).Round(time.Millisecond))
+		}()
+	}
+	cmd := exec.CommandContext(g.ctx, gitBin(), args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if g.ctx.Err() != nil {
+			return "", fmt.Errorf("git cancelled: %w", g.ctx.Err())
+		}
 		operation := "command"
 		if len(args) > 0 {
 			operation = args[0]
@@ -34,49 +57,53 @@ func git(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-var urlCredential = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
+var (
+	urlCredential = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]+@`)
+	urlParameters = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^\s'"<>?#]+)[?#][^\s'"<>]*`)
+)
 
 func redactCredentials(message string) string {
-	return urlCredential.ReplaceAllString(message, "${1}[redacted]@")
+	message = urlCredential.ReplaceAllString(message, "${1}[redacted]@")
+	return urlParameters.ReplaceAllString(message, "${1}[redacted]")
 }
 
-func gitOk(dir string, args ...string) bool {
-	_, err := git(dir, args...)
+func (g gitRunner) gitOk(dir string, args ...string) bool {
+	_, err := g.git(dir, args...)
 	return err == nil
 }
 
-func gitRoot(dir string) (string, error) {
-	root, err := git(dir, "rev-parse", "--show-toplevel")
+func (g gitRunner) gitRoot(dir string) (string, error) {
+	root, err := g.git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
 	return filepath.EvalSymlinks(root)
 }
 
-func branch(dir string) (string, error) {
-	b, err := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+func (g gitRunner) branch(dir string) (string, error) {
+	b, err := g.git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || b == "" {
 		return "", fmt.Errorf("a named branch is required in %s", dir)
 	}
 	return b, nil
 }
 
-func head(dir string) (string, error) { return git(dir, "rev-parse", "HEAD") }
+func (g gitRunner) head(dir string) (string, error) { return g.git(dir, "rev-parse", "HEAD") }
 
-func refSHA(dir, ref string) (string, error) {
-	return git(dir, "rev-parse", "--verify", ref+"^{commit}")
+func (g gitRunner) refSHA(dir, ref string) (string, error) {
+	return g.git(dir, "rev-parse", "--verify", ref+"^{commit}")
 }
 
-func gitCommonDir(dir string) (string, error) {
-	p, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+func (g gitRunner) gitCommonDir(dir string) (string, error) {
+	p, err := g.git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
 	return filepath.EvalSymlinks(p)
 }
 
-func assertBranchName(name string) error {
-	if name == "" || !gitOk("", "check-ref-format", "--branch", name) {
+func (g gitRunner) assertBranchName(name string) error {
+	if name == "" || !g.gitOk("", "check-ref-format", "--branch", name) {
 		return fmt.Errorf("invalid branch name: %q", name)
 	}
 	return nil
@@ -92,8 +119,8 @@ type GitStatus struct {
 	Behind   string `json:"behind,omitempty"`
 }
 
-func status(dir string) (GitStatus, error) {
-	output, err := git(dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
+func (g gitRunner) gitStatus(dir string) (GitStatus, error) {
+	output, err := g.git(dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
 	if err != nil {
 		return GitStatus{}, err
 	}
@@ -116,16 +143,16 @@ func status(dir string) (GitStatus, error) {
 	return s, nil
 }
 
-func dirtyDetails(dir string) (string, error) {
-	return git(dir, "status", "--short", "--untracked-files=all", "--ignored")
+func (g gitRunner) dirtyDetails(dir string) (string, error) {
+	return g.git(dir, "status", "--short", "--untracked-files=all", "--ignored")
 }
 
-func remoteHead(dir, name string) (string, error) {
-	remote, err := git(dir, "remote", "get-url", "origin")
+func (g gitRunner) remoteHead(dir, name string) (string, error) {
+	remote, err := g.git(dir, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err
 	}
-	out, err := git(dir, "ls-remote", "--heads", remote, "refs/heads/"+name)
+	out, err := g.git(dir, "ls-remote", "--heads", "--", remote, "refs/heads/"+name)
 	if err != nil {
 		return "", err
 	}

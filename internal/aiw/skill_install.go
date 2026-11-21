@@ -16,7 +16,7 @@ var aiwSkillNames = []string{"aiw-init", "aiw-reference"}
 
 const skillCompatibilityMarker = "AIW-GO-WORKTREE-V1"
 
-func installSkills(root string) error {
+func (r commandEnv) installSkills(root string) error {
 	if err := checkSkillParents(root); err != nil {
 		return err
 	}
@@ -35,9 +35,9 @@ func installSkills(root string) error {
 		}
 	}
 	args := []string{"--yes", "skills", "add", "KiritoKing/aiw-cli", "--skill", "aiw-init", "--skill", "aiw-reference", "--agent", "universal", "--copy", "--yes"}
-	cmd := exec.Command(npx, args...)
+	cmd := exec.CommandContext(r.ctx, npx, args...)
 	cmd.Dir = root
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = r.Out, r.ErrOut
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("npx skills add failed: %w", err)
 	}

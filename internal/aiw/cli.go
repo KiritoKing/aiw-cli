@@ -1,462 +1,275 @@
 package aiw
 
 import (
-	"encoding/json"
-	"flag"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 func Run(args []string) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		printHelp()
-		return nil
-	}
-	switch args[0] {
-	case "init":
-		return runInit(args[1:])
-	case "version":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: aiw version")
-		}
-		fmt.Println(buildVersion())
-		return nil
-	case "agents":
-		return runAgents(args[1:])
-	case "workspace":
-		return runWorkspace(args[1:])
-	case "doctor":
-		return runDoctor()
-	case "repo":
-		return runRepo(args[1:])
-	case "change":
-		return runChange(args[1:])
-	case "completion":
-		return runCompletion(args[1:])
-	default:
-		return fmt.Errorf("unknown command %q; run aiw --help", args[0])
-	}
+	return RunContext(context.Background(), args)
 }
 
-func printHelp() {
-	fmt.Print(`AIW assembles business Git worktrees inside an Agent Repo worktree created by your control plane.
-
-Usage:
-  aiw init <agent-repo-path> [--skip-skills]
-  aiw version
-  aiw agents sync
-  aiw workspace sync
-  aiw doctor
-  aiw repo list [--json] | register <name> --source <path> | scan <dir> | sync [name]
-  aiw change select --repo <name> [--repo <name>...]
-  aiw change add-repo <name> | remove-repo <name>
-  aiw change materialize | repair | status [--json]
-  aiw change setup [name] | cleanup <name>
-  aiw change list | path <branch> | open <branch>
-  aiw change close [--allow-unpushed] [--discard-changes]
-  aiw completion zsh | bash
-
-The control plane creates the Agent Repo worktree. During Propose, write .aiw/change.yaml.
-Before dispatching business tasks, run aiw change materialize; it runs selected repo setup scripts.
-The control plane calls aiw change close during cleanup; AIW runs repo cleanup before release.
-`)
+func RunContext(ctx context.Context, args []string) error {
+	return RunWithIO(ctx, args, defaultIO())
 }
 
-func runInit(args []string) error {
-	var target string
-	skipSkills := false
-	for _, arg := range args {
-		switch {
-		case arg == "--skip-skills" && !skipSkills:
-			skipSkills = true
-		case strings.HasPrefix(arg, "-") || target != "":
-			return fmt.Errorf("usage: aiw init <agent-repo-path> [--skip-skills]")
-		default:
-			target = arg
-		}
+func RunWithIO(ctx context.Context, args []string, streams IO) error {
+	r := newCommandEnv(ctx, streams)
+	root := newRootCommand(r)
+	// Cobra uses the process argv when SetArgs receives nil.
+	if args == nil {
+		args = []string{}
 	}
-	if target == "" {
-		return fmt.Errorf("usage: aiw init <agent-repo-path> [--skip-skills]")
-	}
-	path, err := filepath.Abs(target)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return err
-		}
-		if len(entries) != 0 {
-			return fmt.Errorf("refusing to initialize Git in a nonempty directory: %s", path)
-		}
-		if _, err := git(path, "init", "-b", "main"); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	root, err := gitRoot(path)
-	if err != nil {
-		return fmt.Errorf("inspect Git root at %s: %w", path, err)
-	}
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return fmt.Errorf("resolve Agent Repo path %s: %w", path, err)
-	}
-	if root != resolvedPath {
-		return fmt.Errorf("path must be an Agent Repo root: %s (Git root: %s)", path, root)
-	}
-	if _, err := os.Stat(filepath.Join(path, "aiw.yaml")); err == nil {
-		return fmt.Errorf("aiw.yaml already exists: %s", path)
-	}
-	if err := checkToolchainPaths(path); err != nil {
-		return err
-	}
-	if err := syncAgentInstructions(path); err != nil {
-		return err
-	}
-	b, err := branch(path)
-	if err != nil {
-		return err
-	}
-	cfg := ProjectConfig{Version: 1, Name: filepath.Base(path), Base: b, Repos: map[string]RepoConfig{}}
-	if err := saveProject(path, cfg); err != nil {
-		return err
-	}
-	ignore := filepath.Join(path, ".gitignore")
-	old, err := os.ReadFile(ignore)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if !strings.Contains("\n"+string(old)+"\n", "\n/repos/\n") {
-		content := string(old)
-		if content != "" && !strings.HasSuffix(content, "\n") {
-			content += "\n"
-		}
-		content += "/repos/\n"
-		if err := atomicWrite(ignore, []byte(content)); err != nil {
-			return err
-		}
-	}
-	if err := writeToolchainFiles(path); err != nil {
-		return err
-	}
-	if err := autoSyncVSCodeWorkspace(path, cfg); err != nil {
-		return err
-	}
-	if !skipSkills {
-		if err := installSkills(path); err != nil {
-			return fmt.Errorf("Agent Repo initialized at %s, but skill installation failed: %w; install skills separately or use your own installer", path, err)
-		}
-	}
-	fmt.Printf("initialized %s; edit aiw.yaml, then commit it in the Agent Repo\n", path)
-	return nil
+	root.SetArgs(args)
+	return root.ExecuteContext(ctx)
 }
 
-func runWorkspace(args []string) error {
-	if len(args) != 1 || args[0] != "sync" {
-		return fmt.Errorf("usage: aiw workspace sync")
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	root, err := projectRoot(cwd)
-	if err != nil {
-		return err
-	}
-	actual, err := gitRoot(root)
-	if err != nil {
-		return err
-	}
-	if actual != root {
-		return fmt.Errorf("aiw.yaml must be at the Agent Repo worktree root: %s", root)
-	}
-	cfg, err := loadProject(root)
-	if err != nil {
-		return err
-	}
-	if err := syncVSCodeWorkspace(root, cfg); err != nil {
-		return err
-	}
-	fmt.Printf("synced %s\n", filepath.Join(root, vscodeWorkspaceFile))
-	return nil
+type commandOptions struct {
+	cwd     string
+	verbose bool
+	noInput bool
+	noColor bool
 }
 
-func runDoctor() error {
-	version, err := git("", "--version")
-	if err != nil {
-		return err
+func newRootCommand(env commandEnv) *cobra.Command {
+	var options commandOptions
+	root := &cobra.Command{
+		Use:           "aiw",
+		Short:         "Assemble business Git worktrees in a control-plane-created Agent Repo worktree",
+		Version:       buildVersion(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	fmt.Println(version)
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	root, err := projectRoot(cwd)
-	if err != nil {
-		fmt.Println("no Agent Repo at current path")
-		return nil
-	}
-	cfg, err := loadProject(root)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Agent Repo: %s (%s, %d repos)\n", cfg.Name, root, len(cfg.Repos))
-	return nil
-}
+	root.SetVersionTemplate("{{.Version}}\n")
+	root.SetIn(env.In)
+	root.SetOut(env.Out)
+	root.SetErr(env.ErrOut)
+	flags := root.PersistentFlags()
+	flags.StringVarP(&options.cwd, "cwd", "C", "", "run from this directory")
+	flags.BoolVar(&options.noColor, "no-color", false, "disable terminal colors")
+	flags.BoolVar(&options.noInput, "no-input", false, "disable interactive prompts")
+	flags.BoolVar(&options.verbose, "verbose", false, "log Git commands and execution times to stderr")
+	_ = root.MarkPersistentFlagDirname("cwd")
 
-func runRepo(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: aiw repo list|register|scan|sync")
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	root, err := projectRoot(cwd)
-	if err != nil {
-		return err
-	}
-	home, err := dataHome()
-	if err != nil {
-		return err
-	}
-	switch args[0] {
-	case "list":
-		if len(args) != 1 && !(len(args) == 2 && args[1] == "--json") {
-			return fmt.Errorf("usage: aiw repo list [--json]")
+	runEnv := func(cmd *cobra.Command) (commandEnv, error) {
+		r := env
+		r.noColor, r.noInput = options.noColor, options.noInput
+		r.jsonOutput, _ = cmd.Flags().GetBool("json")
+		if options.verbose {
+			r.verbose = r.ErrOut
 		}
-		cfg, err := loadProject(root)
-		if err != nil {
-			return err
-		}
-		registry, err := loadRegistry(home)
-		if err != nil {
-			return err
-		}
-		names := make([]string, 0, len(cfg.Repos))
-		for name := range cfg.Repos {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		if len(args) == 2 {
-			rows := make([]RepoListRow, 0, len(names))
-			for _, name := range names {
-				repo := cfg.Repos[name]
-				row := RepoListRow{Name: name, Remote: redactCredentials(repo.Remote), Base: repo.Base, Metadata: repo.Metadata}
-				if entry, ok := registry.Repos[canonicalRemote(repo.Remote)]; ok {
-					row.Registered, row.Source, row.Store = true, entry.Source, entry.Store
-				}
-				rows = append(rows, row)
-			}
-			out, err := json.MarshalIndent(rows, "", "  ")
+		return r.inDirectory(options.cwd)
+	}
+	bind := func(action func(commandEnv, []string) error) func(*cobra.Command, []string) error {
+		return func(cmd *cobra.Command, args []string) error {
+			r, err := runEnv(cmd)
 			if err != nil {
 				return err
 			}
-			fmt.Println(string(out))
-			return nil
+			return action(r, args)
 		}
-		for _, name := range names {
-			state := "unregistered"
-			if entry, ok := registry.Repos[canonicalRemote(cfg.Repos[name].Remote)]; ok {
-				state = entry.Store
-			}
-			fmt.Printf("%-16s %-16s %s\n", name, cfg.Repos[name].Base, state)
-		}
+	}
+
+	var skipSkills bool
+	initCmd := leaf("init <agent-repo-path>", "Initialize an Agent Repo", cobra.ExactArgs(1), bind(func(r commandEnv, args []string) error {
+		return r.initProject(args[0], skipSkills)
+	}))
+	initCmd.ValidArgsFunction = completeDirectory
+	initCmd.Flags().BoolVar(&skipSkills, "skip-skills", false, "skip installing the default skills")
+	root.AddCommand(initCmd)
+	root.AddCommand(leaf("version", "Print the AIW version", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+		cmd.Println(buildVersion())
 		return nil
-	case "register":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: aiw repo register <name> --source <path>")
-		}
-		fs := flag.NewFlagSet("repo register", flag.ContinueOnError)
-		source := fs.String("source", "", "existing local checkout")
-		if err := fs.Parse(args[2:]); err != nil {
+	}))
+	doctor := leaf("doctor", "Check tools and the current Agent Repo", cobra.NoArgs, bind(func(r commandEnv, _ []string) error {
+		return r.doctor()
+	}))
+	jsonFlag(doctor)
+	root.AddCommand(doctor)
+	agents := commandGroup("agents", "Manage Agent Repo instructions")
+	agents.AddCommand(leaf("sync", "Update the managed AGENTS.md block", cobra.NoArgs, bind(func(r commandEnv, _ []string) error {
+		return r.syncAgents()
+	})))
+	root.AddCommand(agents)
+	workspace := commandGroup("workspace", "Manage the generated VS Code workspace")
+	workspace.AddCommand(leaf("sync", "Regenerate aiw.code-workspace", cobra.NoArgs, bind(func(r commandEnv, _ []string) error {
+		return r.syncWorkspace()
+	})))
+	root.AddCommand(workspace)
+
+	repo := commandGroup("repo", "Register, list and sync business repositories")
+	bindRepo := func(action func(commandEnv, string, string, []string) error, lock bool) func(*cobra.Command, []string) error {
+		return bind(func(r commandEnv, args []string) error {
+			root, err := projectRoot(r.Cwd)
+			if err != nil {
+				return err
+			}
+			home, err := r.dataHome()
+			if err != nil {
+				return err
+			}
+			if lock {
+				return r.withLock(filepath.Join(home, "registry.lock"), func() error {
+					return action(r, root, home, args)
+				})
+			}
+			return action(r, root, home, args)
+		})
+	}
+	list := leaf("list", "List configured business repositories", cobra.NoArgs, bindRepo(func(r commandEnv, root, home string, _ []string) error {
+		return r.repoList(root, home)
+	}, false))
+	jsonFlag(list)
+	var source string
+	register := leaf("register <name>", "Register an existing local checkout", func(cmd *cobra.Command, args []string) error {
+		if err := cobra.ExactArgs(1)(cmd, args); err != nil {
 			return err
 		}
-		if *source == "" {
+		if source == "" {
 			return fmt.Errorf("--source is required")
 		}
-		return withLock(filepath.Join(home, "registry.lock"), func() error {
-			return registerRepo(root, home, args[1], *source)
+		return nil
+	}, bindRepo(func(r commandEnv, root, home string, args []string) error {
+		return r.withProgress("Registering repository…", func(work commandEnv) error {
+			return work.registerRepo(root, home, args[0], source)
 		})
-	case "scan":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: aiw repo scan <dir>")
-		}
-		return withLock(filepath.Join(home, "registry.lock"), func() error {
-			return scanRepos(root, home, args[1])
+	}, true))
+	register.Flags().StringVar(&source, "source", "", "existing local checkout")
+	_ = register.MarkFlagDirname("source")
+	scan := leaf("scan <dir>", "Find and register matching local checkouts", cobra.ExactArgs(1), bindRepo(func(r commandEnv, root, home string, args []string) error {
+		return r.withProgress("Scanning for repositories…", func(work commandEnv) error {
+			return work.scanRepos(root, home, args[0])
 		})
-	case "sync":
-		if len(args) > 2 {
-			return fmt.Errorf("usage: aiw repo sync [name]")
-		}
-		name := ""
-		if len(args) == 2 {
-			name = args[1]
-		}
-		return withLock(filepath.Join(home, "registry.lock"), func() error {
-			return syncRepo(root, home, name)
+	}, true))
+	scan.ValidArgsFunction = completeDirectory
+	sync := leaf("sync [name]", "Fetch configured baselines into the managed stores", cobra.MaximumNArgs(1), bindRepo(func(r commandEnv, root, home string, args []string) error {
+		return r.withProgress("Syncing repositories…", func(work commandEnv) error {
+			return work.syncRepo(root, home, firstArg(args))
 		})
-	default:
-		return fmt.Errorf("unknown repo command %q", args[0])
-	}
-}
+	}, true))
+	repo.AddCommand(list, register, scan, sync)
+	root.AddCommand(repo)
 
-type RepoListRow struct {
-	Name       string         `json:"name"`
-	Remote     string         `json:"remote"`
-	Base       string         `json:"base"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Registered bool           `json:"registered"`
-	Source     string         `json:"source,omitempty"`
-	Store      string         `json:"store,omitempty"`
-}
-
-type stringFlags []string
-
-func (f *stringFlags) String() string { return strings.Join(*f, ",") }
-func (f *stringFlags) Set(value string) error {
-	*f = append(*f, value)
-	return nil
-}
-
-func runChange(args []string) error {
-	if os.Getenv("AIW_LIFECYCLE_ACTIVE") == "1" {
-		return fmt.Errorf("AIW Change commands cannot run inside a repository setup or cleanup script")
-	}
-	if len(args) == 0 {
-		return fmt.Errorf("usage: aiw change select|materialize|setup|cleanup|status|close|list|path|open|repair")
-	}
-	if args[0] == "list" || args[0] == "path" || args[0] == "open" {
-		return changeLookup(args)
-	}
-	c, err := currentChange()
-	if err != nil {
-		return err
-	}
-	return changeLock(c, func() error { return runChangeLocked(c, args) })
-}
-
-func runChangeLocked(c ChangeContext, args []string) error {
-	switch args[0] {
-	case "select":
-		fs := flag.NewFlagSet("change select", flag.ContinueOnError)
-		var names stringFlags
-		fs.Var(&names, "repo", "repository to select")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		if len(names) == 0 || fs.NArg() != 0 {
-			return fmt.Errorf("usage: aiw change select --repo <name> [--repo <name>...]")
-		}
-		return c.selectRepos(names)
-	case "add-repo", "remove-repo":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: aiw change %s <name>", args[0])
-		}
-		if args[0] == "add-repo" {
-			return c.updateSelection("add", args[1])
-		}
-		return c.updateSelection("remove", args[1])
-	case "materialize":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: aiw change materialize")
-		}
-		return c.materialize(false)
-	case "setup":
-		if len(args) > 2 {
-			return fmt.Errorf("usage: aiw change setup [name]")
-		}
-		return c.setup(args[1:])
-	case "cleanup":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: aiw change cleanup <name>")
-		}
-		return c.cleanup(args[1])
-	case "repair":
-		return c.repair()
-	case "status":
-		fs := flag.NewFlagSet("change status", flag.ContinueOnError)
-		jsonOutput := fs.Bool("json", false, "JSON output")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		return c.status(*jsonOutput)
-	case "close":
-		fs := flag.NewFlagSet("change close", flag.ContinueOnError)
-		allow := fs.Bool("allow-unpushed", false, "close when remote branch is not confirmed equal")
-		discard := fs.Bool("discard-changes", false, "discard local changes in AIW business worktrees")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		return c.close(CloseOptions{AllowUnpushed: *allow, Discard: *discard})
-	default:
-		return fmt.Errorf("unknown change command %q", args[0])
-	}
-}
-
-func changeLookup(args []string) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	root, err := projectRoot(cwd)
-	if err != nil {
-		return err
-	}
-	project, err := gitCommonDir(root)
-	if err != nil {
-		return err
-	}
-	home, err := dataHome()
-	if err != nil {
-		return err
-	}
-	if args[0] == "list" {
-		entries, err := os.ReadDir(filepath.Join(home, "changes", hash(project)))
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if !strings.HasSuffix(entry.Name(), ".json") {
-				continue
-			}
-			data, err := os.ReadFile(filepath.Join(home, "changes", hash(project), entry.Name()))
-			if err != nil {
-				return err
-			}
-			var s ChangeState
-			if err := json.Unmarshal(data, &s); err != nil {
-				return err
-			}
-			fmt.Printf("%-24s %-16s %s\n", s.Branch, s.Phase, s.Root)
+	change := commandGroup("change", "Manage business worktrees for a Change")
+	change.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
+		if os.Getenv("AIW_LIFECYCLE_ACTIVE") == "1" {
+			return fmt.Errorf("AIW Change commands cannot run inside a repository setup or cleanup script")
 		}
 		return nil
 	}
-	if len(args) != 2 {
-		return fmt.Errorf("usage: aiw change %s <branch>", args[0])
+	bindChange := func(action func(ChangeContext, []string) error) func(*cobra.Command, []string) error {
+		return bind(func(r commandEnv, args []string) error {
+			c, err := r.currentChange()
+			if err != nil {
+				return err
+			}
+			return c.withChangeLock(func() error { return action(c, args) })
+		})
 	}
-	s, err := loadState(home, project, args[1])
-	if err != nil {
-		return err
+
+	var names []string
+	selectCmd := leaf("select", "Select business repositories for this Change", func(cmd *cobra.Command, args []string) error {
+		if err := cobra.NoArgs(cmd, args); err != nil {
+			return err
+		}
+		promptEnv := env
+		promptEnv.noInput = options.noInput
+		if len(names) == 0 && !promptEnv.isInteractive() {
+			return fmt.Errorf("usage: aiw change select --repo <name> [--repo <name>...]")
+		}
+		return nil
+	}, bindChange(func(c ChangeContext, _ []string) error {
+		selected := names
+		if len(selected) == 0 {
+			var err error
+			selected, err = c.chooseRepos()
+			if err != nil {
+				return err
+			}
+		}
+		return c.selectRepos(selected)
+	}))
+	selectCmd.Flags().StringArrayVar(&names, "repo", nil, "repository to select (repeatable)")
+	add := leaf("add-repo <name>", "Add a repository to the Change selection", cobra.ExactArgs(1), bindChange(func(c ChangeContext, args []string) error {
+		return c.updateSelection("add", args[0])
+	}))
+	remove := leaf("remove-repo <name>", "Remove a repository from the Change selection", cobra.ExactArgs(1), bindChange(func(c ChangeContext, args []string) error {
+		return c.updateSelection("remove", args[0])
+	}))
+	materialize := leaf("materialize", "Reconcile business worktrees and run setup", cobra.NoArgs, bindChange(func(c ChangeContext, _ []string) error {
+		return c.materialize(false)
+	}))
+	repair := leaf("repair", "Recover worktrees and links after interruption", cobra.NoArgs, bindChange(func(c ChangeContext, _ []string) error {
+		return c.repair()
+	}))
+	status := leaf("status", "Show Git status and readiness", cobra.NoArgs, bindChange(func(c ChangeContext, _ []string) error {
+		return c.status()
+	}))
+	jsonFlag(status)
+	setup := leaf("setup [name]", "Run pending setup or retry an explicitly named repository", cobra.MaximumNArgs(1), bindChange(func(c ChangeContext, args []string) error {
+		return c.setup(args)
+	}))
+	cleanup := leaf("cleanup <name>", "Run cleanup for a materialized repository", cobra.ExactArgs(1), bindChange(func(c ChangeContext, args []string) error {
+		return c.cleanup(args[0])
+	}))
+	var closeOptions CloseOptions
+	closeCmd := leaf("close", "Run cleanup and release AIW business worktrees", cobra.NoArgs, bindChange(func(c ChangeContext, _ []string) error {
+		return c.close(closeOptions)
+	}))
+	closeCmd.Flags().BoolVar(&closeOptions.AllowUnpushed, "allow-unpushed", false, "close when remote branch equality is unverified")
+	closeCmd.Flags().BoolVar(&closeOptions.Discard, "discard-changes", false, "discard local changes in AIW business worktrees")
+	changeList := leaf("list", "List registered Changes for the current project", cobra.NoArgs, bind(func(r commandEnv, _ []string) error {
+		return r.changeList()
+	}))
+	jsonFlag(changeList)
+	lookup := bind(func(r commandEnv, args []string) error { return r.changePath(args[0]) })
+	path := leaf("path <branch>", "Show the control-plane worktree path", cobra.ExactArgs(1), lookup)
+	open := leaf("open <branch>", "Return the existing control-plane worktree path", cobra.ExactArgs(1), lookup)
+	change.AddCommand(selectCmd, add, remove, materialize, repair, status, setup, cleanup, closeCmd, changeList, path, open)
+	root.AddCommand(change)
+
+	repoCompletion := completeRepos(runEnv)
+	for _, cmd := range []*cobra.Command{register, sync, add, remove, setup, cleanup} {
+		cmd.ValidArgsFunction = repoCompletion
 	}
-	if s.Root == "" {
-		return fmt.Errorf("Change %s not registered on this machine", args[1])
+	_ = selectCmd.RegisterFlagCompletionFunc("repo", repoCompletion)
+	path.ValidArgsFunction = completeBranches(runEnv)
+	open.ValidArgsFunction = path.ValidArgsFunction
+	root.InitDefaultCompletionCmd()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "completion" {
+			cmd.RunE = requireSubcommand
+			break
+		}
 	}
-	if _, err := os.Stat(s.Root); err != nil {
-		return fmt.Errorf("control-plane worktree unavailable: %s", s.Root)
+	return root
+}
+
+func leaf(use, short string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {
+	return &cobra.Command{Use: use, Short: short, Args: args, RunE: run}
+}
+
+func commandGroup(name, short string) *cobra.Command {
+	return leaf(name, short, cobra.NoArgs, requireSubcommand)
+}
+
+func requireSubcommand(cmd *cobra.Command, _ []string) error {
+	return fmt.Errorf("%s requires a subcommand; run %s --help", cmd.CommandPath(), cmd.CommandPath())
+}
+
+func jsonFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool("json", false, "output JSON")
+}
+
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return ""
 	}
-	fmt.Println(s.Root)
-	return nil
+	return args[0]
 }

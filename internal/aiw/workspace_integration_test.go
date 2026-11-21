@@ -41,6 +41,7 @@ func assertIntegrationWorkspace(t *testing.T, root, name string, repos ...string
 }
 
 func TestWorkspaceSyncCommandUsesCurrentConfigAndReplacesFile(t *testing.T) {
+	isolateGitConfig(t)
 	root := filepath.Join(t.TempDir(), "agent")
 	if err := Run([]string{"init", root, "--skip-skills"}); err != nil {
 		t.Fatal(err)
@@ -54,7 +55,7 @@ func TestWorkspaceSyncCommandUsesCurrentConfigAndReplacesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadProject(root)
+	cfg, err := testEnv().loadProject(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestWorkspaceSyncCommandUsesCurrentConfigAndReplacesFile(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(root, "repos")); !os.IsNotExist(err) {
 		t.Fatalf("workspace sync created business paths: %v", err)
 	}
-	if _, err := git(root, "check-ignore", "--quiet", vscodeWorkspaceFile); err != nil {
+	if _, err := testEnv().git(root, "check-ignore", "--quiet", vscodeWorkspaceFile); err != nil {
 		t.Fatalf("generated workspace is not locally ignored: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, vscodeWorkspaceFile), []byte(`{"folders": [], "settings": {"editor.fontSize": 30}, "tasks": {}}`), 0644); err != nil {
@@ -132,14 +133,17 @@ func TestWorkspaceSyncRejectsArgumentsBeforeDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chdir(previous) })
-	for _, args := range [][]string{
-		{"workspace"},
-		{"workspace", "unknown"},
-		{"workspace", "sync", "extra"},
-		{"workspace", "sync", "--unknown"},
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"workspace"}, "requires a subcommand"},
+		{[]string{"workspace", "unknown"}, "unknown command"},
+		{[]string{"workspace", "sync", "extra"}, "unknown command"},
+		{[]string{"workspace", "sync", "--unknown"}, "unknown flag"},
 	} {
-		if err := Run(args); err == nil || !strings.Contains(err.Error(), "usage: aiw workspace sync") {
-			t.Fatalf("%v should fail usage validation before project discovery, got %v", args, err)
+		if err := Run(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%v should fail usage validation before project discovery, got %v", tc.args, err)
 		}
 	}
 	entries, err := os.ReadDir(root)
@@ -149,6 +153,7 @@ func TestWorkspaceSyncRejectsArgumentsBeforeDiscovery(t *testing.T) {
 }
 
 func TestProjectVSCodeAutoSyncConfiguration(t *testing.T) {
+	isolateGitConfig(t)
 	base := "version: 1\nname: example\nbase: main\nrepos: {}\n"
 	for _, tc := range []struct {
 		name string
@@ -160,7 +165,7 @@ func TestProjectVSCodeAutoSyncConfiguration(t *testing.T) {
 		{name: "disabled", yaml: "vscode:\n  autoSync: false\n", want: newWorkspaceBool(false)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := parseProject([]byte(base + tc.yaml))
+			cfg, err := testEnv().parseProject([]byte(base + tc.yaml))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,14 +176,14 @@ func TestProjectVSCodeAutoSyncConfiguration(t *testing.T) {
 			if err := saveProject(root, cfg); err != nil {
 				t.Fatal(err)
 			}
-			reloaded, err := loadProject(root)
+			reloaded, err := testEnv().loadProject(root)
 			if err != nil || !reflect.DeepEqual(reloaded.VSCode.AutoSync, tc.want) {
 				t.Fatalf("autoSync did not survive save/load: %+v, %v", reloaded.VSCode, err)
 			}
 		})
 	}
 	for _, invalid := range []string{"vscode: false\n", "vscode:\n  autoSync: nope\n", "vscode:\n  autoSync: []\n"} {
-		if _, err := parseProject([]byte(base + invalid)); err == nil {
+		if _, err := testEnv().parseProject([]byte(base + invalid)); err == nil {
 			t.Fatalf("invalid workspace setting accepted: %q", invalid)
 		}
 	}
@@ -188,7 +193,7 @@ func newWorkspaceBool(value bool) *bool { return &value }
 
 func TestWorkspaceAutomaticMaterializeAndRepair(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")
@@ -197,7 +202,7 @@ func TestWorkspaceAutomaticMaterializeAndRepair(t *testing.T) {
 	if _, err := os.Lstat(c.linkPath("api")); !os.IsNotExist(err) {
 		t.Fatalf("workspace generation materialized an unselected repo: %v", err)
 	}
-	if _, err := git(c.Root, "check-ignore", "--quiet", vscodeWorkspaceFile); err != nil {
+	if _, err := testEnv().git(c.Root, "check-ignore", "--quiet", vscodeWorkspaceFile); err != nil {
 		t.Fatalf("workspace is not ignored in Change worktree: %v", err)
 	}
 	if err := os.Remove(filepath.Join(c.Root, vscodeWorkspaceFile)); err != nil {
@@ -232,7 +237,7 @@ func TestWorkspaceAutomaticMaterializeAndRepair(t *testing.T) {
 
 func TestWorkspaceAutoSyncFailureBeforeMaterializeCanRetry(t *testing.T) {
 	f := newFixture(t)
-	f.mustRun(registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
+	f.mustRun(testEnv().registerRepo(f.root, os.Getenv("AIW_HOME"), "web", f.source["web"]))
 	f.checkout()
 	c := f.context()
 	f.spec("web")

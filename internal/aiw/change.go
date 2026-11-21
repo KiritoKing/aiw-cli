@@ -1,7 +1,6 @@
 package aiw
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 )
 
 type ChangeContext struct {
+	commandEnv
 	Root    string
 	Project string
 	Branch  string
@@ -16,42 +16,38 @@ type ChangeContext struct {
 	Home    string
 }
 
-func currentChange() (ChangeContext, error) {
-	cwd, err := os.Getwd()
+func (r commandEnv) currentChange() (ChangeContext, error) {
+	root, err := projectRoot(r.Cwd)
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	root, err := projectRoot(cwd)
-	if err != nil {
-		return ChangeContext{}, err
-	}
-	actual, err := gitRoot(root)
+	actual, err := r.gitRoot(root)
 	if err != nil || actual != root {
 		return ChangeContext{}, fmt.Errorf("aiw.yaml must be at the Agent Repo worktree root: %s", root)
 	}
-	cfg, err := loadProject(root)
+	cfg, err := r.loadProject(root)
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	b, err := branch(root)
+	b, err := r.branch(root)
 	if err != nil {
 		return ChangeContext{}, err
 	}
 	if b == cfg.Base {
 		return ChangeContext{}, fmt.Errorf("run this command in a control-plane-created Change worktree, not the Agent Repo base branch %s", b)
 	}
-	if err := assertBranchName(b); err != nil {
+	if err := r.assertBranchName(b); err != nil {
 		return ChangeContext{}, err
 	}
-	common, err := gitCommonDir(root)
+	common, err := r.gitCommonDir(root)
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	home, err := dataHome()
+	home, err := r.dataHome()
 	if err != nil {
 		return ChangeContext{}, err
 	}
-	return ChangeContext{Root: root, Project: common, Branch: b, Config: cfg, Home: home}, nil
+	return ChangeContext{commandEnv: r, Root: root, Project: common, Branch: b, Config: cfg, Home: home}, nil
 }
 
 func (c ChangeContext) worktreePath(name string) string {
@@ -90,11 +86,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 	if err != nil {
 		return err
 	}
-	lifecycle, err := c.lifecycleConfig()
-	if err != nil {
-		return err
-	}
-	tracked, err := git(c.Root, "ls-files", "--", "repos")
+	tracked, err := c.git(c.Root, "ls-files", "--", "repos")
 	if err != nil {
 		return err
 	}
@@ -102,7 +94,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 		return fmt.Errorf("repos/ contains tracked Agent Repo files; remove them from Git before materializing")
 	}
 	for _, name := range spec.Repos {
-		if !gitOk(c.Root, "check-ignore", "--quiet", "--no-index", "repos/"+name) {
+		if !c.gitOk(c.Root, "check-ignore", "--quiet", "--no-index", "repos/"+name) {
 			return fmt.Errorf("repos/%s is not ignored by the Agent Repo; add /repos/ to .gitignore", name)
 		}
 	}
@@ -117,9 +109,6 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 	desired := map[string]bool{}
 	for _, name := range spec.Repos {
 		desired[name] = true
-		if _, err := c.repoLifecycle(lifecycle, name); err != nil {
-			return err
-		}
 	}
 	removed := []string{}
 	for name, old := range s.Repos {
@@ -130,7 +119,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 	sort.Strings(removed)
 	stores := map[string]string{}
 	for _, name := range spec.Repos {
-		store, err := storeFor(c.Config, registry, name)
+		store, err := c.storeFor(c.Config, registry, name)
 		if err != nil {
 			return err
 		}
@@ -146,28 +135,24 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			} else if !os.IsNotExist(err) {
 				return err
 			}
-			if gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch) && s.Phase != "closed" {
+			if c.gitOk(store, "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch) && s.Phase != "closed" {
 				return fmt.Errorf("branch %s already exists in repo %s; use change repair if this is an interrupted AIW operation", c.Branch, name)
 			}
 		}
 	}
+	removedStores := map[string]string{}
 	if runLifecycle {
 		for _, name := range removed {
 			old := s.Repos[name]
-			if _, err := c.repoLifecycle(lifecycle, name); err != nil {
+			store, err := c.stateStore(name, old)
+			if err != nil {
 				return err
 			}
-			store := old.Store
-			if store == "" {
-				store, err = storeFor(c.Config, registry, name)
-				if err != nil {
-					return err
-				}
-			}
+			removedStores[name] = store
 			if err := c.checkOwned(name, old.Path, store); err != nil {
 				return err
 			}
-			dirty, err := dirtyDetails(old.Path)
+			dirty, err := c.dirtyDetails(old.Path)
 			if err != nil {
 				return err
 			}
@@ -176,7 +161,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			}
 		}
 	}
-	if err := autoSyncVSCodeWorkspace(c.Root, c.Config); err != nil {
+	if err := c.autoSyncVSCodeWorkspace(c.Root, c.Config); err != nil {
 		return err
 	}
 	s.Phase = "materializing"
@@ -188,10 +173,9 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			if err := c.checkOwned(name, old.Path, stores[name]); err != nil {
 				return err
 			}
-			if old.Store == "" {
-				old.Store = stores[name]
-				s.Repos[name] = old
-			}
+			old.Store = stores[name]
+			old.recordCleanup(c.Config.Repos[name].Cleanup)
+			s.Repos[name] = old
 			continue
 		}
 		path := c.worktreePath(name)
@@ -199,10 +183,10 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			return err
 		}
 		baseRef := "refs/remotes/origin/" + c.Config.Repos[name].Base
-		existingBranch := gitOk(stores[name], "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch)
+		existingBranch := c.gitOk(stores[name], "show-ref", "--verify", "--quiet", "refs/heads/"+c.Branch)
 		base := s.Repos[name].Base
 		if base == "" || !existingBranch {
-			base, err = refSHA(stores[name], baseRef)
+			base, err = c.refSHA(stores[name], baseRef)
 			if err != nil {
 				return fmt.Errorf("repo %s has no local baseline; run aiw repo sync %s: %w", name, name, err)
 			}
@@ -214,10 +198,12 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 			}
 			args = []string{"worktree", "add", path, c.Branch}
 		}
-		if _, err := git(stores[name], args...); err != nil {
+		if _, err := c.git(stores[name], args...); err != nil {
 			return err
 		}
-		s.Repos[name] = RepoState{Path: path, Base: base, Store: stores[name], Setup: "pending"}
+		entry := RepoState{Path: path, Base: base, Store: stores[name], Setup: "pending"}
+		entry.recordCleanup(c.Config.Repos[name].Cleanup)
+		s.Repos[name] = entry
 		if err := saveState(c.Home, s); err != nil {
 			return err
 		}
@@ -227,28 +213,19 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 		if err := os.Symlink(path, c.linkPath(name)); err != nil {
 			return err
 		}
-		fmt.Printf("materialized %s -> %s\n", name, path)
+		fmt.Fprintf(c.Out, "materialized %s -> %s\n", name, path)
 	}
 	if runLifecycle {
 		for _, name := range removed {
-			old := s.Repos[name]
-			store := old.Store
-			if store == "" {
-				var err error
-				store, err = storeFor(c.Config, registry, name)
-				if err != nil {
-					return err
-				}
-			}
-			if err := c.cleanupRepo(&s, name, lifecycle, false); err != nil {
+			if err := c.cleanupRepo(&s, name, false); err != nil {
 				return err
 			}
-			if err := c.removeWorktree(name, old.Path, store, discard); err != nil {
+			entry := s.Repos[name]
+			if err := c.removeWorktree(name, entry.Path, removedStores[name], discard); err != nil {
 				return err
 			}
-			old.Path = ""
-			old.Cleanup = "success"
-			s.Repos[name] = old
+			entry.Path = ""
+			s.Repos[name] = entry
 			if err := saveState(c.Home, s); err != nil {
 				return err
 			}
@@ -257,7 +234,7 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 	if !runLifecycle {
 		for _, name := range spec.Repos {
 			entry := s.Repos[name]
-			repo := lifecycle.Repos[name]
+			repo := c.Config.Repos[name]
 			if repo.Setup == nil && entry.Setup == "" {
 				entry.Setup = "success"
 				s.Repos[name] = entry
@@ -285,12 +262,12 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 		if entry.Setup == "success" {
 			entry.Setup = "pending"
 		}
-		entry.Cleanup = ""
+		entry.CleanupStatus = ""
 		s.Repos[name] = entry
 		if err := saveState(c.Home, s); err != nil {
 			return err
 		}
-		if err := c.setupRepo(&s, name, lifecycle); err != nil {
+		if err := c.setupRepo(&s, name); err != nil {
 			return err
 		}
 	}
@@ -302,6 +279,9 @@ func (c ChangeContext) reconcile(discard, runLifecycle bool) error {
 }
 
 func (c ChangeContext) checkOwned(name, path, store string) error {
+	if !safeKey.MatchString(name) {
+		return fmt.Errorf("invalid repository name in Change state: %q", name)
+	}
 	if path != c.worktreePath(name) {
 		return fmt.Errorf("worktree path mismatch for %s: %s", name, path)
 	}
@@ -312,7 +292,7 @@ func (c ChangeContext) checkOwned(name, path, store string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("managed worktree path is not a directory: %s", path)
 	}
-	actual, err := gitCommonDir(path)
+	actual, err := c.gitCommonDir(path)
 	if err != nil {
 		return err
 	}
@@ -320,7 +300,7 @@ func (c ChangeContext) checkOwned(name, path, store string) error {
 	if err != nil || actual != storeReal {
 		return fmt.Errorf("worktree %s is not owned by managed store %s", path, store)
 	}
-	b, err := branch(path)
+	b, err := c.branch(path)
 	if err != nil || b != c.Branch {
 		return fmt.Errorf("worktree %s is not on expected branch %s", path, c.Branch)
 	}
@@ -344,7 +324,7 @@ func (c ChangeContext) removeWorktree(name, path, store string, discard bool) er
 	if err := c.checkOwned(name, path, store); err != nil {
 		return err
 	}
-	details, err := dirtyDetails(path)
+	details, err := c.dirtyDetails(path)
 	if err != nil {
 		return err
 	}
@@ -356,7 +336,7 @@ func (c ChangeContext) removeWorktree(name, path, store string, discard bool) er
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	if _, err := git(store, args...); err != nil {
+	if _, err := c.git(store, args...); err != nil {
 		return err
 	}
 	if err := os.Remove(c.linkPath(name)); err != nil && !os.IsNotExist(err) {
@@ -378,16 +358,12 @@ type StatusRow struct {
 	Cleanup string    `json:"cleanup,omitempty"`
 }
 
-func (c ChangeContext) status(jsonOutput bool) error {
+func (c ChangeContext) status() error {
 	s, err := c.state()
 	if err != nil {
 		return err
 	}
-	lifecycle, err := c.lifecycleConfig()
-	if err != nil {
-		return err
-	}
-	rootStatus, err := status(c.Root)
+	rootStatus, err := c.gitStatus(c.Root)
 	if err != nil {
 		return err
 	}
@@ -407,53 +383,54 @@ func (c ChangeContext) status(jsonOutput bool) error {
 		if p == "" {
 			continue
 		}
-		gitState, err := status(p)
+		gitState, err := c.gitStatus(p)
 		if err != nil {
 			return fmt.Errorf("repo %s: %w", name, err)
 		}
 		setup := s.Repos[name].Setup
-		if setup == "" && lifecycle.Repos[name].Setup == nil {
+		if repo, declared := c.Config.Repos[name]; setup == "" && declared && repo.Setup == nil {
 			setup = "success"
 		}
-		rows = append(rows, StatusRow{Repo: name, Path: p, State: gitState, BaseSHA: s.Repos[name].Base, Drift: gitState.Branch != c.Branch, Active: true, Ready: setup == "success", Setup: setup, Cleanup: s.Repos[name].Cleanup})
+		rows = append(rows, StatusRow{Repo: name, Path: p, State: gitState, BaseSHA: s.Repos[name].Base, Drift: gitState.Branch != c.Branch, Active: true, Ready: setup == "success", Setup: setup, Cleanup: s.Repos[name].CleanupStatus})
 	}
-	if jsonOutput {
-		out, _ := json.MarshalIndent(rows, "", "  ")
-		fmt.Println(string(out))
+	if c.jsonOutput {
+		return c.writeJSON(rows)
+	}
+	rootLabel := fileStatus(rootStatus)
+	if rows[0].Drift {
+		rootLabel += ", drift"
+	}
+	fmt.Fprintf(c.Out, "Change %s  Phase: %s  Ready: %t\n", c.Branch, s.Phase, ready)
+	fmt.Fprintf(c.Out, "Agent Repo  %s  %s\n", rootLabel, terminalLabel(c.Root))
+	cells := make([][]string, 0, len(rows)-1)
+	for _, row := range rows[1:] {
+		drift := "—"
+		if row.Drift {
+			drift = "drift"
+		}
+		cells = append(cells, []string{row.Repo, row.State.Branch, fileStatus(row.State), drift, row.Setup, row.Cleanup, row.Path})
+	}
+	if len(cells) == 0 {
 		return nil
 	}
-	for _, row := range rows {
-		label := "clean"
-		if row.State.Dirty {
-			label = fmt.Sprintf("dirty(%d)", row.State.Changed)
-		}
-		if row.Drift {
-			label += " DRIFT"
-		}
-		if row.Repo == "agent-repo" {
-			label += " phase=" + row.Phase
-			if !row.Ready {
-				label += " NOT-READY"
-			}
-		} else {
-			label += " setup=" + row.Setup
-			if row.Cleanup == "failed" || row.Cleanup == "running" {
-				label += " cleanup=" + row.Cleanup
-			}
-		}
-		fmt.Printf("%-16s %-24s %-10s %s\n", row.Repo, row.State.Branch, label, row.Path)
+	return c.printTable([]string{"REPO", "BRANCH", "FILES", "DRIFT", "SETUP", "CLEANUP", "PATH"}, cells, 2, 3, 4, 5)
+}
+
+func fileStatus(state GitStatus) string {
+	if !state.Dirty {
+		return "clean"
 	}
-	return nil
+	return fmt.Sprintf("dirty (%d)", state.Changed)
 }
 
 func (c ChangeContext) updateSelection(action, name string) error {
-	if _, ok := c.Config.Repos[name]; !ok {
+	if _, ok := c.Config.Repos[name]; !ok && action == "add" {
 		return fmt.Errorf("unknown repo %s", name)
 	}
 	spec := ChangeSpec{Version: 1}
 	if _, err := os.Stat(specPath(c.Root)); err == nil {
 		var loadErr error
-		spec, loadErr = loadSpec(c.Root, c.Config)
+		spec, loadErr = readSpec(c.Root)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -465,6 +442,9 @@ func (c ChangeContext) updateSelection(action, name string) error {
 	if action == "add" {
 		selected[name] = true
 	} else {
+		if _, declared := c.Config.Repos[name]; !declared && !selected[name] {
+			return fmt.Errorf("unknown repo %s", name)
+		}
 		delete(selected, name)
 	}
 	if len(selected) == 0 {
@@ -514,10 +494,10 @@ func (c ChangeContext) selectRepos(names []string) error {
 	if string(previous) == string(current) {
 		return nil
 	}
-	if _, err := git(c.Root, "add", "--", ".aiw/change.yaml"); err != nil {
+	if _, err := c.git(c.Root, "add", "--", ".aiw/change.yaml"); err != nil {
 		return err
 	}
-	if _, err := git(c.Root, "commit", "-m", "aiw: update repository selection", "--only", "--", ".aiw/change.yaml"); err != nil {
+	if _, err := c.git(c.Root, "commit", "-m", "aiw: update repository selection", "--only", "--", ".aiw/change.yaml"); err != nil {
 		return err
 	}
 	return nil
@@ -556,11 +536,11 @@ func (c ChangeContext) repair() error {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			continue
 		}
-		store, err := storeFor(c.Config, registry, name)
+		store, err := c.storeFor(c.Config, registry, name)
 		if err != nil {
 			return err
 		}
-		actual, err := gitCommonDir(path)
+		actual, err := c.gitCommonDir(path)
 		if err != nil {
 			return err
 		}
@@ -568,13 +548,13 @@ func (c ChangeContext) repair() error {
 		if err != nil || actual != storeReal {
 			return fmt.Errorf("cannot adopt worktree %s: store mismatch", path)
 		}
-		b, err := branch(path)
+		b, err := c.branch(path)
 		if err != nil || b != c.Branch {
 			return fmt.Errorf("cannot adopt worktree %s: branch mismatch", path)
 		}
 		base := s.Repos[name].Base
 		if base == "" {
-			base, _ = refSHA(store, "refs/remotes/origin/"+c.Config.Repos[name].Base)
+			base, _ = c.refSHA(store, "refs/remotes/origin/"+c.Config.Repos[name].Base)
 		}
 		s.Repos[name] = RepoState{Path: path, Base: base, Store: store}
 		if err := saveState(c.Home, s); err != nil {
